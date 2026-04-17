@@ -1,0 +1,431 @@
+(* ============================================================================
+   Radahn v0 — formal grammar (EBNF)
+   ============================================================================
+
+   Status:   v0 surface syntax, frozen for Epic 0.4 (lexer + parser).
+   Source:   docs/Design.md §4 (lexical + grammatical rules), §5 (worked
+             examples), §11.8 (extern / TS interop).
+   Flavour:  W3C-style EBNF — `::=` for production, `|` for alternation,
+             `?` `*` `+` for quantifiers, parentheses for grouping,
+             double-quoted strings for literal terminals, ALL-CAPS names
+             for lexical tokens, CamelCase names for syntactic non-terminals.
+
+   Pinned canonical forms (where Design.md showed two):
+
+     - Generic type arguments:   `[` `]`        NOT `<` `>`
+       (`<` `>` clashes with comparison operators — LR(1)-unfriendly.)
+     - Module header:            full block with `end-module`
+       (the `module foo/bar@1.2` shorthand from §8.5.2 is NOT accepted.)
+     - Effect row:               `! { name, name }`    (braced, comma-sep)
+       (the `! Fs<write>, Net<https>` form from §5.1 is NOT accepted.)
+     - ADT sum variant lead:     leading `|` required on every arm
+       (including the first; reserves bare-`|`-expressions for future
+       lambda / closure syntax.)
+     - Statement terminator:     NEWLINE inside `{ }` (no semicolons)
+     - Contract clauses:         parsed in v0, checked in v1 (Epic 1.3)
+     - Refinement clauses:       parsed in v0, checked in v2 (Epic 2.2)
+
+   Disambiguation rules that require >1-token lookahead are listed at the
+   bottom of this file with their resolution strategy.
+   ============================================================================ *)
+
+
+(* ----------------------------------------------------------------------------
+   1.  Lexical grammar — terminals
+   ----------------------------------------------------------------------------
+
+   The lexer emits the tokens below.  Whitespace and comments are skipped
+   except where NEWLINE is significant (see §1.5).  Identifiers and
+   keywords share a character class; a reserved-word table is consulted
+   after the longest-match rule picks the token text.
+*)
+
+(* 1.1 Identifiers *)
+
+IDENT        ::= IDENT_START IDENT_CONT*
+IDENT_START  ::= "a".."z" | "A".."Z" | "_"
+IDENT_CONT   ::= IDENT_START | "0".."9"
+
+(* Type identifiers share the IDENT token class.  The parser distinguishes
+   them positionally: a TYPE_IDENT is any IDENT in a type-production slot.
+   By convention (enforced by `radahn fmt`, not the grammar) type names
+   begin with an upper-case letter. *)
+
+
+(* 1.2 Keywords (reserved — cannot appear as IDENT)
+
+   Listed from Design §4.2 plus `end-module`, `return`, `for`, `in`,
+   `extern`, `pub`, `else`, `true`, `false`, which appear in worked
+   examples (§5.1, §8.5.2, §11.8). *)
+
+KEYWORD ::=
+      "fn"      | "let"      | "if"      | "else"
+    | "match"   | "module"   | "end-module"
+    | "import"  | "export"   | "extern"  | "pub"
+    | "effect"  | "cap"
+    | "type"    | "trait"    | "impl"
+    | "where"   | "pre"      | "post"    | "cost"
+    | "spec"    | "test"
+    | "partial" | "linear"
+    | "return"  | "for"      | "in"
+    | "true"    | "false"
+
+
+(* 1.3 Literal tokens *)
+
+INT_LIT      ::= DEC_LIT | HEX_LIT | OCT_LIT | BIN_LIT
+DEC_LIT      ::= ("0" | "1".."9" ("_"? "0".."9")*)
+HEX_LIT      ::= "0x" ("0".."9" | "a".."f" | "A".."F") (("_" | "0".."9" | "a".."f" | "A".."F"))*
+OCT_LIT      ::= "0o" ("0".."7") (("_" | "0".."7"))*
+BIN_LIT      ::= "0b" ("0" | "1") (("_" | "0" | "1"))*
+
+FLOAT_LIT    ::= DEC_LIT "." DEC_LIT (("e" | "E") ("+" | "-")? DEC_LIT)?
+               | DEC_LIT ("e" | "E") ("+" | "-")? DEC_LIT
+
+STRING_LIT   ::= "\"" (STRING_CHAR | ESCAPE)* "\""
+STRING_CHAR  ::= ? any UTF-8 scalar except "\"", "\\", or NEWLINE ?
+ESCAPE       ::= "\\" ("\"" | "\\" | "n" | "r" | "t" | "0"
+                       | "x" HEX HEX
+                       | "u" "{" HEX+ "}")
+HEX          ::= "0".."9" | "a".."f" | "A".."F"
+
+BOOL_LIT     ::= "true" | "false"
+
+
+(* 1.4 Operators and punctuation *)
+
+OP           ::=
+      "+"  | "-"  | "*"  | "/"  | "%"
+    | "==" | "!=" | "<"  | "<=" | ">"  | ">="
+    | "&&" | "||" | "!"  | "?"
+    | "="  | "->" | "=>" | "::" | ".."
+    | "++"                                    (* string/list concat, §8.5.2 *)
+    | ","  | "."  | ";"  | ":"
+    | "("  | ")"  | "["  | "]"  | "{"  | "}"
+    | "|"
+    | "@"                                     (* contract-clause prefix *)
+
+
+(* 1.5 Whitespace, comments, newlines *)
+
+WS           ::= (" " | "\t")+               (* non-significant *)
+NEWLINE      ::= "\r"? "\n"
+
+LINE_COMMENT ::= "//"   (? any char except NEWLINE ?)* NEWLINE
+DOC_COMMENT  ::= "///"  (? any char except NEWLINE ?)* NEWLINE
+HINT_COMMENT ::= "//@"  (? any char except NEWLINE ?)* NEWLINE
+
+(* NEWLINE is a statement terminator INSIDE `{ … }` blocks.
+   NEWLINE is plain whitespace INSIDE `( … )` or `[ … ]` (so long
+   argument lists and long type lists may wrap).
+   Comments always act as whitespace (DOC_COMMENT is attached to the
+   next declaration by the parser, not the grammar). *)
+
+
+(* ----------------------------------------------------------------------------
+   2.  Syntactic grammar — top level
+   ----------------------------------------------------------------------------
+*)
+
+File         ::= ModuleHeader TopDecl*
+
+ModuleHeader ::= "module" ModulePath NEWLINE
+                 ModuleField*
+                 "end-module" NEWLINE
+
+ModulePath   ::= IDENT ("." IDENT | "/" IDENT)*
+
+ModuleField  ::=
+      "version" ":" STRING_LIT NEWLINE
+    | "exports" ":" "[" IdentList? "]" NEWLINE
+    | "effects" ":" "[" EffectName ("," EffectName)* "]" NEWLINE
+    | "caps"    ":" "[" IdentList? "]" NEWLINE
+    | "since"   ":" STRING_LIT NEWLINE
+    | "summary" ":" STRING_LIT NEWLINE
+
+(* `exports` is required on non-empty modules — checked semantically
+   (diagnostic E0601 / E0204), not here, so the grammar accepts any order
+   and any subset. *)
+
+IdentList    ::= IDENT ("," IDENT)*
+
+
+(* ----------------------------------------------------------------------------
+   3.  Top-level declarations
+   ----------------------------------------------------------------------------
+*)
+
+TopDecl      ::= Import
+               | Visibility? FnDecl
+               | Visibility? TypeDecl
+               | ExternBlock
+
+Visibility   ::= "pub"
+
+Import       ::= "import" ModulePath ("{" IdentList "}")? NEWLINE
+
+
+(* 3.1 Function declarations *)
+
+FnDecl       ::= "fn" IDENT
+                 TypeParams?
+                 "(" ParamList? ")"
+                 ("->" Type)?
+                 EffectRow?
+                 ContractClause*
+                 (Block | NEWLINE)
+
+ParamList    ::= Param ("," Param)* ","?
+Param        ::= IDENT ":" Type
+
+TypeParams   ::= "[" IDENT ("," IDENT)* "]"
+
+EffectRow    ::= "!" "{" (EffectName ("," EffectName)*)? "}"
+EffectName   ::= IDENT ("." IDENT)*             (* e.g. `fs.read` *)
+
+ContractClause ::=
+      "@" "pre"  Expr  NEWLINE
+    | "@" "post" Expr  NEWLINE
+    | "@" "cost" CostFields NEWLINE
+
+CostFields   ::= CostField ("," CostField)*
+CostField    ::= IDENT ":" CostValue
+CostValue    ::= ("<=" | "~")? (INT_LIT | FLOAT_LIT) IDENT?
+               (* examples: `tokens: 120`, `ops: ~6`, `time <= 5s` *)
+
+
+(* 3.2 Type declarations *)
+
+TypeDecl     ::= "type" IDENT TypeParams? "=" TypeExpr NEWLINE
+
+TypeExpr     ::= SumType
+               | Type
+
+SumType      ::= "|" Variant ("|" Variant)+     (* ≥ 2 variants *)
+               | "|" Variant                    (* single-variant legal *)
+Variant      ::= IDENT ("(" VariantPayload ")")?
+VariantPayload ::= Type ("," Type)*
+                 | FieldList                    (* named payload *)
+
+
+(* 3.3 Type expressions *)
+
+Type         ::= TypeAtom ("where" Expr)?       (* refinement — parsed only *)
+
+TypeAtom     ::= NominalType
+               | RecordType
+               | TupleType
+               | FnType
+               | "(" Type ")"
+               | "(" ")"                        (* unit *)
+
+NominalType  ::= IDENT ("." IDENT)* TypeArgs?
+TypeArgs     ::= "[" Type ("," Type)* "]"
+
+RecordType   ::= "{" FieldList? "}"
+FieldList    ::= Field ("," Field)* ","?
+Field        ::= IDENT ":" Type
+
+TupleType    ::= "(" Type "," Type ("," Type)* ")"
+
+FnType       ::= "fn" "(" (Type ("," Type)*)? ")" "->" Type EffectRow?
+
+
+(* 3.4 Extern blocks (§11.8) *)
+
+ExternBlock  ::= "extern" "module" ModulePath "{" NEWLINE
+                 ExternDecl*
+                 "}" NEWLINE
+
+ExternDecl   ::= "fn" IDENT "(" ParamList? ")" ("->" Type)? EffectRow? NEWLINE
+               | "type" IDENT TypeParams? NEWLINE       (* opaque *)
+
+
+(* ----------------------------------------------------------------------------
+   4.  Statements and blocks
+   ----------------------------------------------------------------------------
+*)
+
+Block        ::= "{" NEWLINE Stmt* "}"
+
+Stmt         ::= LetStmt
+               | ReturnStmt
+               | ExprStmt
+
+LetStmt      ::= "let" Pattern (":" Type)? "=" Expr NEWLINE
+ReturnStmt   ::= "return" Expr? NEWLINE
+ExprStmt     ::= Expr NEWLINE
+
+
+(* ----------------------------------------------------------------------------
+   5.  Patterns (for `let` and `match`)
+   ----------------------------------------------------------------------------
+*)
+
+Pattern      ::= WildcardPat
+               | LiteralPat
+               | BindingPat
+               | CtorPat
+               | RecordPat
+               | TuplePat
+
+WildcardPat  ::= "_"
+LiteralPat   ::= INT_LIT | FLOAT_LIT | STRING_LIT | BOOL_LIT
+BindingPat   ::= IDENT                              (* binds in scope *)
+CtorPat      ::= IDENT ("(" Pattern ("," Pattern)* ")")?
+RecordPat    ::= "{" (RecordPatField ("," RecordPatField)*)? "}"
+RecordPatField ::= IDENT (":" Pattern)?             (* shorthand: `{ x }` *)
+TuplePat     ::= "(" Pattern "," Pattern ("," Pattern)* ")"
+
+
+(* ----------------------------------------------------------------------------
+   6.  Expressions — precedence-climb
+   ----------------------------------------------------------------------------
+
+   Loosest-binding at the top; tightest at the bottom.  Each level accepts
+   the level below, so the precedence is enforced structurally.
+*)
+
+Expr         ::= OrExpr
+               | IfExpr
+               | MatchExpr
+
+OrExpr       ::= AndExpr    ("||" AndExpr)*
+AndExpr      ::= CmpExpr    ("&&" CmpExpr)*
+CmpExpr      ::= RangeExpr  (CmpOp RangeExpr)?
+CmpOp        ::= "==" | "!=" | "<" | "<=" | ">" | ">="
+
+RangeExpr    ::= AddExpr (".." AddExpr)?            (* e.g. `0..3` *)
+AddExpr      ::= MulExpr (("+" | "-" | "++") MulExpr)*
+MulExpr      ::= UnaryExpr (("*" | "/" | "%") UnaryExpr)*
+
+UnaryExpr    ::= ("-" | "!") UnaryExpr
+               | PostfixExpr
+
+PostfixExpr  ::= PrimaryExpr PostfixOp*
+PostfixOp    ::= CallArgs
+               | "." IDENT
+               | "[" Expr "]"
+               | "?"
+               | "::" "<" Type ">"                 (* turbofish, e.g. decode::<T> *)
+
+CallArgs     ::= "(" (Arg ("," Arg)* ","?)? ")"
+Arg          ::= IDENT "=" Expr                    (* named *)
+               | Expr                              (* positional *)
+
+PrimaryExpr  ::= Literal
+               | IDENT
+               | "(" Expr ")"
+               | TupleExpr
+               | RecordExpr
+               | ListExpr
+               | Block                             (* block-as-expression *)
+
+Literal      ::= INT_LIT | FLOAT_LIT | STRING_LIT | BOOL_LIT | "(" ")"
+
+TupleExpr    ::= "(" Expr "," Expr ("," Expr)* ")"
+RecordExpr   ::= IDENT? "{" (RecordInit ("," RecordInit)* ","?)? "}"
+RecordInit   ::= IDENT ":" Expr
+               | IDENT                              (* shorthand `{ x }` *)
+ListExpr     ::= "[" (Expr ("," Expr)* ","?)? "]"
+
+
+(* 6.1 if / match as expressions *)
+
+IfExpr       ::= "if" Expr Block ("else" (IfExpr | Block))?
+
+MatchExpr    ::= "match" Expr "{" NEWLINE MatchArm+ "}"
+MatchArm     ::= Pattern ("if" Expr)? "=>" (Expr | Block) NEWLINE
+
+
+(* ----------------------------------------------------------------------------
+   7.  Disambiguation rules — the non-LR(1) cases and how we resolve them
+   ----------------------------------------------------------------------------
+
+   EBNF alone cannot express these; the parser enforces them.  Each rule is
+   discharged with at most one token of lookahead past the ambiguous
+   position, so the language remains LR(1) per Design §4.2.
+
+   R1.  `[` after IDENT — generic args vs. list-index.
+        Resolution: the grammar never permits an expression in a type-only
+        slot, so `[` following an IDENT that was parsed as `NominalType`
+        opens `TypeArgs`; `[` following an IDENT that was parsed as an
+        `Expr` primary opens an index `PostfixOp`.  No lookahead past `[`
+        is required because the production context is fixed before we
+        reach `[`.
+
+   R2.  `::` followed by `<` (turbofish).
+        Without the `::`, `foo<T>` would be ambiguous with `foo < T`.
+        Only `::` `<` introduces type arguments in expression context;
+        plain `<` is always a comparison operator in expression context.
+
+   R3.  ADT variants lead with `|`.
+        `type T = | A | B` (leading `|` required, even on the first arm).
+        A type RHS beginning with `|` is unambiguously a `SumType`;
+        a type RHS beginning with `{`, `(`, or IDENT is unambiguously a
+        non-sum `Type`.
+
+   R4.  NEWLINE as statement terminator.
+        Inside `{ … }`:  NEWLINE ends the current Stmt, unless the parser
+        is inside an unclosed `(`, `[`, or open `match` arm.
+        Inside `( … )` / `[ … ]`:  NEWLINE is plain whitespace.
+        A single counter of "open paren/bracket depth" is sufficient; no
+        arbitrary lookahead is needed.
+
+   R5.  `=` in call-argument position is a named argument, never
+        assignment.  Radahn v0 has no assignment expression; once the
+        parser is inside a `CallArgs`, seeing IDENT followed by `=` always
+        starts a named `Arg`.  Outside call args, `=` appears only in
+        `let`, `type`, and ModuleField productions, all of which are
+        entered from distinct keywords, so no ambiguity arises.
+
+   R6.  `-` unary vs. binary.
+        Resolved by precedence-climb structure: `-` is binary only in
+        `AddExpr`, unary only in `UnaryExpr`.  Reading `-` after a complete
+        primary / postfix expression is binary; reading `-` at the start
+        of an `Expr` or after another operator is unary.
+
+   R7.  `?` is always postfix.
+        The grammar never permits `?` in infix position; it appears only
+        as a `PostfixOp`.  `foo()?.bar` parses as `((foo())?).bar`.
+
+   R8.  `where` — refinement vs. constraint.
+        In v0, `where` appears only in a `Type` production (refinement
+        clause).  The generic-constraint use-site (`fn f[T](x: T) where
+        T: Ord`) is *not* accepted in v0; it is reserved and will be
+        added in Epic 1.1 without grammar breakage because the only new
+        position is between `)` (or `-> Type`) and the function body.
+
+   R9.  `else if` chains.
+        `IfExpr ::= … ("else" (IfExpr | Block))?` handles `else if`
+        without a dedicated `elif` keyword.  The right-recursion is
+        unambiguous under LR(1).
+
+   R10. `!` — unary "not" vs. effect-row introducer.
+        `!` is the effect-row introducer only at the end of a function
+        signature (directly after `)` or `-> Type`).  Elsewhere it is
+        unary "not".  The parser enters the EffectRow production only
+        from FnDecl / ExternDecl / FnType — these are the only sites
+        where `!` can legally mean "effects"; any other `!` is unary.
+
+   R11. `{ … }` — block vs. record literal.
+        `Block` requires NEWLINE immediately after `{`:
+            `Block       ::= "{" NEWLINE Stmt* "}"`
+            `RecordExpr  ::= IDENT? "{" RecordInit ("," RecordInit)* ","? "}"`
+        The first token after `{` decides:
+          - NEWLINE            → `Block`
+          - IDENT `:`          → `RecordExpr` (anonymous record)
+          - `}`                → `RecordExpr` (empty record; an empty
+                                  block would have a NEWLINE before `}`)
+        Two-token lookahead (`{` plus one token) is sufficient.
+
+        A RecordExpr with leading IDENT (`RefundReceipt { … }`) is
+        disallowed in the scrutinee position of `if`, `while`, `for`,
+        and `match` to avoid ambiguity with the Block that follows the
+        scrutinee (compare Rust's "struct-literal in condition" rule).
+        In those positions, the grammar requires parentheses around any
+        expression ending in `{ … }`.
+
+   ============================================================================ *)
+
+(* end of file *)
