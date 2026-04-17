@@ -25,8 +25,11 @@
      - Contract clauses:         parsed in v0, checked in v1 (Epic 1.3)
      - Refinement clauses:       parsed in v0, checked in v2 (Epic 2.2)
 
-   Disambiguation rules that require >1-token lookahead are listed at the
-   bottom of this file with their resolution strategy.
+   Disambiguation rules are listed at the bottom of this file (R1–R13)
+   with their resolution strategy.  Two rules (R2, R11) require a
+   bounded 2-token lookahead from the decision point — a documented
+   deviation from Design §4.2's "1-token" wording.  All other rules
+   resolve under standard LR(1).
    ============================================================================ *)
 
 
@@ -54,9 +57,10 @@ IDENT_CONT   ::= IDENT_START | "0".."9"
 
 (* 1.2 Keywords (reserved — cannot appear as IDENT)
 
-   Listed from Design §4.2 plus `end-module`, `return`, `for`, `in`,
-   `extern`, `pub`, `else`, `true`, `false`, which appear in worked
-   examples (§5.1, §8.5.2, §11.8). *)
+   Listed from Design §4.2 plus `end-module`, `return`, `extern`, `pub`,
+   `else`, which appear in worked examples (§5.1, §8.5.2, §11.8).  See
+   the trailing note for the IDENT-but-restricted cases (`pre`, `post`,
+   `cost`, `for`, `in`, `true`, `false`). *)
 
 KEYWORD ::=
       "fn"      | "let"      | "if"      | "else"
@@ -64,11 +68,23 @@ KEYWORD ::=
     | "import"  | "export"   | "extern"  | "pub"
     | "effect"  | "cap"
     | "type"    | "trait"    | "impl"
-    | "where"   | "pre"      | "post"    | "cost"
+    | "where"
     | "spec"    | "test"
     | "partial" | "linear"
-    | "return"  | "for"      | "in"
-    | "true"    | "false"
+    | "return"
+
+(* `pre`, `post`, `cost` are NOT global keywords — they are contextual,
+   recognised only in the position immediately after `@` (see ContractClause
+   in §3.1).  This keeps them usable as ordinary identifiers elsewhere
+   (e.g. a field named `cost`).
+
+   `for`, `in` are reserved-for-future-use.  They have no syntactic
+   production in v0; encountering them at any position raises E0101
+   (unexpected token).  `for`-loops land in v1 (Epic 1.1 / stdlib work).
+
+   `true`, `false` are NOT keywords — they are the BOOL_LIT terminal
+   below.  Treating them as literals (not keywords) keeps the lexer rule
+   for them in one place. *)
 
 
 (* 1.3 Literal tokens *)
@@ -184,9 +200,19 @@ EffectRow    ::= "!" "{" (EffectName ("," EffectName)*)? "}"
 EffectName   ::= IDENT ("." IDENT)*             (* e.g. `fs.read` *)
 
 ContractClause ::=
-      "@" "pre"  Expr  NEWLINE
-    | "@" "post" Expr  NEWLINE
-    | "@" "cost" CostFields NEWLINE
+      "@" ContractName ContractBody NEWLINE
+
+ContractName ::= "pre" | "post" | "cost"
+                 (* Contextual: the lexer emits IDENT for these strings;
+                    the parser, immediately after consuming `@`, accepts
+                    ONLY this closed set.  Any other IDENT after `@`
+                    fires E0501 (malformed contract clause) with a
+                    suggestion listing the legal names.  This is the
+                    only place E0501 is reached; everywhere else, a
+                    syntactically broken `@…` falls through to E0101. *)
+
+ContractBody ::= CostFields                     (* iff ContractName = "cost" *)
+               | Expr                           (* iff ContractName = "pre" or "post" *)
 
 CostFields   ::= CostField ("," CostField)*
 CostField    ::= IDENT ":" CostValue
@@ -201,8 +227,10 @@ TypeDecl     ::= "type" IDENT TypeParams? "=" TypeExpr NEWLINE
 TypeExpr     ::= SumType
                | Type
 
-SumType      ::= "|" Variant ("|" Variant)+     (* ≥ 2 variants *)
-               | "|" Variant                    (* single-variant legal *)
+SumType      ::= ("|" Variant)+
+                 (* ≥ 1 variant; a one-variant sum is legal but warned at
+                    a later pass (no diagnostic in v0).  The leading `|`
+                    is required on every arm — see R3. *)
 Variant      ::= IDENT ("(" VariantPayload ")")?
 VariantPayload ::= Type ("," Type)*
                  | FieldList                    (* named payload *)
@@ -264,15 +292,17 @@ ExprStmt     ::= Expr NEWLINE
 
 Pattern      ::= WildcardPat
                | LiteralPat
-               | BindingPat
-               | CtorPat
+               | NamePat
                | RecordPat
                | TuplePat
 
 WildcardPat  ::= "_"
 LiteralPat   ::= INT_LIT | FLOAT_LIT | STRING_LIT | BOOL_LIT
-BindingPat   ::= IDENT                              (* binds in scope *)
-CtorPat      ::= IDENT ("(" Pattern ("," Pattern)* ")")?
+NamePat      ::= IDENT ("(" Pattern ("," Pattern)* ")")?
+                 (* See R12: bare IDENT is a binding *iff* its initial
+                    letter is lower-case; `IDENT(...)` (with payload) is
+                    always a constructor pattern.  Capitalised bare
+                    IDENT is a nullary constructor pattern. *)
 RecordPat    ::= "{" (RecordPatField ("," RecordPatField)*)? "}"
 RecordPatField ::= IDENT (":" Pattern)?             (* shorthand: `{ x }` *)
 TuplePat     ::= "(" Pattern "," Pattern ("," Pattern)* ")"
@@ -307,7 +337,7 @@ PostfixOp    ::= CallArgs
                | "." IDENT
                | "[" Expr "]"
                | "?"
-               | "::" "<" Type ">"                 (* turbofish, e.g. decode::<T> *)
+               | "::" TypeArgs                     (* turbofish, e.g. decode::[T] *)
 
 CallArgs     ::= "(" (Arg ("," Arg)* ","?)? ")"
 Arg          ::= IDENT "=" Expr                    (* named *)
@@ -342,9 +372,19 @@ MatchArm     ::= Pattern ("if" Expr)? "=>" (Expr | Block) NEWLINE
    7.  Disambiguation rules — the non-LR(1) cases and how we resolve them
    ----------------------------------------------------------------------------
 
-   EBNF alone cannot express these; the parser enforces them.  Each rule is
-   discharged with at most one token of lookahead past the ambiguous
-   position, so the language remains LR(1) per Design §4.2.
+   EBNF alone cannot express these; the parser enforces them.  Most rules
+   are discharged with one token of lookahead past the ambiguous position,
+   keeping Radahn within standard LR(1) parser-generator capability.
+
+   Two rules require a bounded *two*-token lookahead from the decision
+   point: R2 (turbofish `::` + `[`) and R11 (`{` + first token inside).
+   This is a documented deviation from Design §4.2's "1-token" wording —
+   in practice every mainstream LR(1) generator (Bison, Menhir, Lark,
+   Chevrotain) supports bounded extra lookahead via either GLR fallback
+   or k-token modes, and both sites have a hard 2-token bound (no
+   arbitrary lookahead is ever required).  Design §4.2 should be amended
+   to read "LR(1) with two documented 2-token lookahead sites" once
+   Epic 0.4 picks a generator and confirms the choice.
 
    R1.  `[` after IDENT — generic args vs. list-index.
         Resolution: the grammar never permits an expression in a type-only
@@ -354,10 +394,14 @@ MatchArm     ::= Pattern ("if" Expr)? "=>" (Expr | Block) NEWLINE
         is required because the production context is fixed before we
         reach `[`.
 
-   R2.  `::` followed by `<` (turbofish).
-        Without the `::`, `foo<T>` would be ambiguous with `foo < T`.
-        Only `::` `<` introduces type arguments in expression context;
-        plain `<` is always a comparison operator in expression context.
+   R2.  Turbofish for explicit type arguments at a call site.
+        `decode::[T]` (NOT `decode::<T>`) — the turbofish reuses the
+        canonical `[ ]` generic delimiters chosen in the header.  In
+        expression context, a bare `foo[T]` is always an index/subscript
+        (`PostfixOp` `"[" Expr "]"`); to pass an explicit type argument
+        the caller must prefix with `::`.  The two-token sequence
+        `::` `[` is unambiguous because `::` has no other use in
+        expression context in v0.
 
    R3.  ADT variants lead with `|`.
         `type T = | A | B` (leading `|` required, even on the first arm).
@@ -425,6 +469,35 @@ MatchArm     ::= Pattern ("if" Expr)? "=>" (Expr | Block) NEWLINE
         scrutinee (compare Rust's "struct-literal in condition" rule).
         In those positions, the grammar requires parentheses around any
         expression ending in `{ … }`.
+
+   R12. `IDENT` in pattern position — binding vs. constructor.
+        A pattern position accepts `NamePat ::= IDENT ("(" … ")")?`.
+        Disambiguation by case convention (Rust-style):
+          - Bare IDENT, initial letter lower-case      → binding
+          - Bare IDENT, initial letter upper-case      → nullary ctor
+          - IDENT followed by `(`                      → ctor with payload
+            (regardless of case — name resolution will reject lower-case
+            ctor names with a better error than the parser could give)
+          - `_`                                        → WildcardPat
+        Convention is enforced at parse time so the AST records the
+        intended pattern kind.  An upper-case binding (e.g. `let X = 1`)
+        is rejected with E0101 / E0202; a lower-case ctor reference
+        (e.g. `match v { ok(x) => … }`) parses but resolves to E0201
+        (unknown identifier) at name-resolution time.
+
+   R13. NEWLINE inside a `TypeDecl` RHS.
+        Between `=` and the end of `TypeExpr` in a `TypeDecl`, NEWLINE is
+        treated as whitespace (analogous to R4's behaviour inside `( )`
+        and `[ ]`).  This permits the canonical multi-line ADT layout:
+            `type T =`
+            `  | A`
+            `  | B`
+        The TypeDecl is terminated by the NEWLINE that follows the last
+        Variant of the SumType (or the closing token of a non-sum
+        TypeAtom — e.g. `}` for a record, `)` for a tuple).  The parser
+        re-enables NEWLINE significance the moment `TypeExpr` is
+        recognised as complete.  No additional lookahead is required
+        beyond the depth counter R4 already maintains.
 
    ============================================================================ *)
 

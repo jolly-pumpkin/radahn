@@ -43,10 +43,11 @@ Tests: `ModuleHeader` required and terminated by `end-module`, empty
 
 ---
 
-## 2. `refund.rd` — effect row, named call args, `?`, `match`
+## 2. `refund.rd` — imports, effect row, named call args, `?`, `match`
 
 Reduced from Design §5.1. Pinned effect-row syntax is `! { … }`; generic
-arguments use `[ … ]`.
+arguments use `[ … ]`. Demonstrates both forms of `import` (whole-module
+and selective `{ … }`).
 
 ```
 module payments/refund
@@ -54,6 +55,10 @@ module payments/refund
   exports: [refund, RefundError]
   effects: [net, fs.write, log]
 end-module
+
+import std/result { Result, Ok, Err }
+import std/net    { Http }
+import std/log
 
 type RefundError =
   | NotFound(ChargeId)
@@ -78,6 +83,15 @@ Parse tree (abbreviated to the shape-bearing nodes):
 ```
 File
 ├── ModuleHeader (module payments/refund, 3 fields)
+├── TopDecl = Import
+│   ├── ModulePath = std/result
+│   └── IdentList  = [Result, Ok, Err]
+├── TopDecl = Import
+│   ├── ModulePath = std/net
+│   └── IdentList  = [Http]
+├── TopDecl = Import
+│   └── ModulePath = std/log              (no selector → whole-module)
+├── TopDecl = TypeDecl RefundError = SumType (NotFound(ChargeId), Upstream(Int, String))
 └── TopDecl = FnDecl
     ├── Visibility    = pub
     ├── IDENT         = refund
@@ -86,7 +100,7 @@ File
     ├── EffectRow     = ! { net, log }
     └── Block
         ├── Stmt = LetStmt
-        │   ├── BindingPat = resp
+        │   ├── NamePat (binding) = resp
         │   └── Expr = PostfixExpr
         │       ├── PrimaryExpr = http
         │       ├── PostfixOp   = . post
@@ -96,10 +110,12 @@ File
             └── MatchExpr (scrutinee: resp.status, 3 MatchArms)
 ```
 
-Tests: effect row placement after return type; named call arguments
+Tests: both `Import` forms (selective `{ … }` list and whole-module);
+effect row placement after return type; named call arguments
 (`path = …`, `body = …`); postfix `?` after a call; `match` with literal
 arms and a catch-all binding arm (`s => …`); the ADT declared above the
-fn, with leading `|` on every arm.
+fn, with leading `|` on every arm; multi-line ADT layout (R13 suspends
+NEWLINE inside the `TypeDecl` RHS).
 
 ---
 
@@ -140,8 +156,9 @@ File
 ```
 
 Tests: `TypeParams` on both `TypeDecl` and `FnDecl`; a parameter whose
-`Type` is itself an `FnType`; `CtorPat` with a `BindingPat` payload;
-leading `|` on the first variant.
+`Type` is itself an `FnType`; `NamePat` constructor (`Ok(v)`) wrapping a
+`NamePat` binding (`v`); leading `|` on the first variant; multi-line
+ADT layout (R13).
 
 ---
 
@@ -310,10 +327,10 @@ Every v0 surface construct the Roadmap names for this epic is exercised:
 | Construct                         | Example(s)                      |
 |-----------------------------------|---------------------------------|
 | Module headers                    | all (1–7)                       |
-| Imports                           | (not shown; same as module path; see `Import` in grammar) |
+| Imports (selective and whole-module) | 2                            |
 | `fn` signatures with effect rows  | 2, 6, 7                         |
-| ADTs                              | 2, 3                            |
-| Structural records                | 2 (`{ path = …, body = … }`), 7 |
+| ADTs (multi-line variants, R13)   | 2, 3                            |
+| Structural records                | 2 (call args), 7                |
 | Refinement syntax (parsed only)   | 4                               |
 | `let`                             | 2, 5                            |
 | `match`                           | 2, 3                            |
@@ -322,6 +339,7 @@ Every v0 surface construct the Roadmap names for this epic is exercised:
 | Calls                             | 2, 3, 6                         |
 | `?` operator                      | 2                               |
 | `extern module` blocks            | 6                               |
+| Contract clauses (`@pre`/`@post`/`@cost`) | 7                       |
 
 When Epic 0.4's parser tests are written, each snippet here becomes a
 round-trip fixture: `parse(snippet) → AST → pretty-print → parse` must
