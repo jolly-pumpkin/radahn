@@ -1,4 +1,5 @@
-// JSON diagnostic protocol
-// Implementation: Epic 0.2
+// JSON diagnostic protocol. See docs/Diagnostics.md for the reference.
 
-export {};
+export * from "./codes";
+export * from "./examples";
+export * from "./types";
