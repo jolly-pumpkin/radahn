@@ -18,7 +18,7 @@ fix (see Design §4.10).
 
 ```ts
 type Diagnostic = {
-  code: `E${string}`;              // stable code, e.g. "E0201"
+  code: DiagnosticCode;            // literal union of registered codes, e.g. "E0201"
   severity: "error" | "warning" | "info" | "help";
   message: string;                 // single-line summary
   span: Span;                      // primary source location
@@ -29,25 +29,26 @@ type Diagnostic = {
 };
 
 type Span = { file: string; line: number; col: number; len: number };
-type Position = { line: number; col: number };
 
-type Suggestion = {
-  kind:
-    | "add-param" | "add-effect" | "add-import" | "narrow-cap"
-    | "rename" | "insert-text" | "replace-span" | "delete-span";
-  rationale: string;
-  at?: Position;                   // insertion point (for insert-style kinds)
-  span?: Span;                     // target span (for replace/delete kinds)
-  insert?: string;                 // text to insert or replace with
-};
+// Discriminated union: each kind binds the fields it actually requires.
+type Suggestion =
+  | { kind: "delete-span"; rationale: string; span: Span }
+  | { kind: "rename" | "replace-span"; rationale: string; span: Span; insert: string }
+  | { kind: "add-param" | "add-effect" | "add-import" | "narrow-cap" | "insert-text";
+      rationale: string; at: Span; insert: string };
 
 type RelatedInfo = { span: Span; message: string };
 type Note = { message: string; span?: Span };
 ```
 
 `line` and `col` are 1-indexed. `len` is the span length in bytes (0 for a
-point). Fields marked optional are omitted from the JSON when absent — they are
-never emitted as `null`.
+point — including insertion points used as `at`). Every edit target is a full
+`Span` so multi-file suggestions (where the fix is in a different file than the
+diagnostic, e.g. E0204) are unambiguous. Fields marked optional are omitted
+from the JSON when absent — they are never emitted as `null`.
+
+`DiagnosticCode` is the literal union of every code in the registry; emitting
+an unregistered code is a compile error, not a runtime surprise.
 
 ## Code catalogue
 
@@ -82,7 +83,7 @@ let greeting = "hello world
 ```
 
 ```json
-{"code":"E0002","severity":"error","message":"unterminated string literal","span":{"file":"src/refund.rd","line":8,"col":18,"len":14},"suggest":[{"kind":"insert-text","rationale":"close the string literal","at":{"line":8,"col":32},"insert":"\""}],"docs":"https://radahn.dev/e/0002"}
+{"code":"E0002","severity":"error","message":"unterminated string literal","span":{"file":"src/refund.rd","line":8,"col":18,"len":14},"suggest":[{"kind":"insert-text","rationale":"close the string literal","at":{"file":"src/refund.rd","line":8,"col":32,"len":0},"insert":"\""}],"docs":"https://radahn.dev/e/0002"}
 ```
 
 **Fix:** add a closing `"` at the end of the literal.
@@ -165,7 +166,7 @@ fn refund(charge_id: ChargeId) -> Unit !
 ```
 
 ```json
-{"code":"E0104","severity":"error","message":"invalid effect row in signature: expected `!` followed by effect list","span":{"file":"src/refund.rd","line":1,"col":40,"len":1},"suggest":[{"kind":"insert-text","rationale":"add an empty effect row for a pure function","at":{"line":1,"col":40},"insert":" ! {}"}],"docs":"https://radahn.dev/e/0104"}
+{"code":"E0104","severity":"error","message":"invalid effect row in signature: expected `!` followed by effect list","span":{"file":"src/refund.rd","line":1,"col":40,"len":1},"suggest":[{"kind":"insert-text","rationale":"add an empty effect row for a pure function","at":{"file":"src/refund.rd","line":1,"col":40,"len":0},"insert":" ! {}"}],"docs":"https://radahn.dev/e/0104"}
 ```
 
 **Fix:** provide the effect row (`! { Fs<write> }`) or omit the `!` for a pure function.
@@ -233,7 +234,7 @@ import payments.refunds.refund_internal
 ```
 
 ```json
-{"code":"E0204","severity":"error","message":"`refund_internal` is referenced by `src/api.rd` but not exported from `payments.refunds`","span":{"file":"src/api.rd","line":6,"col":18,"len":15},"suggest":[{"kind":"insert-text","rationale":"add the symbol to the module's `exports` list","at":{"line":3,"col":12},"insert":", refund_internal"}],"docs":"https://radahn.dev/e/0204"}
+{"code":"E0204","severity":"error","message":"`refund_internal` is referenced by `src/api.rd` but not exported from `payments.refunds`","span":{"file":"src/api.rd","line":6,"col":18,"len":15},"suggest":[{"kind":"insert-text","rationale":"add the symbol to the producing module's `exports` list","at":{"file":"src/payments/refunds.rd","line":3,"col":12,"len":0},"insert":", refund_internal"}],"docs":"https://radahn.dev/e/0204"}
 ```
 
 **Fix:** add the symbol to the producing module's `exports` list, or use a
@@ -253,7 +254,7 @@ fn refund(charge_id: ChargeId) -> Unit ! {} {
 ```
 
 ```json
-{"code":"E0301","severity":"error","message":"function calls `write_file` which performs effect `Fs<write>`, but the signature declares `{}`","span":{"file":"src/refund.rd","line":11,"col":3,"len":10},"suggest":[{"kind":"add-effect","rationale":"declare the effect in the function signature","at":{"line":9,"col":40},"insert":"Fs<write>"}],"docs":"https://radahn.dev/e/0301"}
+{"code":"E0301","severity":"error","message":"function calls `write_file` which performs effect `Fs<write>`, but the signature declares `{}`","span":{"file":"src/refund.rd","line":11,"col":3,"len":10},"suggest":[{"kind":"add-effect","rationale":"declare the effect in the function signature","at":{"file":"src/refund.rd","line":9,"col":40,"len":0},"insert":"Fs<write>"}],"docs":"https://radahn.dev/e/0301"}
 ```
 
 **Fix:** add the effect to the signature, or stop using it in the body.
@@ -290,7 +291,7 @@ fn caller() -> Unit ! {} {
 ```
 
 ```json
-{"code":"E0303","severity":"error","message":"callee `write_file` performs `Fs<write>` which is not in caller's effect row","span":{"file":"src/refund.rd","line":15,"col":5,"len":10},"related":[{"span":{"file":"src/refund.rd","line":9,"col":40,"len":2},"message":"caller's effect row declared here"}],"suggest":[{"kind":"add-effect","rationale":"widen the caller's effect row to include `Fs<write>`","at":{"line":9,"col":42},"insert":"Fs<write>"}],"docs":"https://radahn.dev/e/0303"}
+{"code":"E0303","severity":"error","message":"callee `write_file` performs `Fs<write>` which is not in caller's effect row","span":{"file":"src/refund.rd","line":15,"col":5,"len":10},"related":[{"span":{"file":"src/refund.rd","line":9,"col":40,"len":2},"message":"caller's effect row declared here"}],"suggest":[{"kind":"add-effect","rationale":"widen the caller's effect row to include `Fs<write>`","at":{"file":"src/refund.rd","line":9,"col":42,"len":0},"insert":"Fs<write>"}],"docs":"https://radahn.dev/e/0303"}
 ```
 
 **Fix:** widen the caller's effect row, or avoid the effectful call.
@@ -325,7 +326,7 @@ match err {
 ```
 
 ```json
-{"code":"E0402","severity":"error","message":"non-exhaustive match: missing variant `RefundError::AlreadyRefunded`","span":{"file":"src/refund.rd","line":18,"col":3,"len":5},"suggest":[{"kind":"insert-text","rationale":"add a match arm for the missing variant","at":{"line":22,"col":3},"insert":"| AlreadyRefunded -> ...\n  "}],"docs":"https://radahn.dev/e/0402"}
+{"code":"E0402","severity":"error","message":"non-exhaustive match: missing variant `RefundError::AlreadyRefunded`","span":{"file":"src/refund.rd","line":18,"col":3,"len":5},"suggest":[{"kind":"insert-text","rationale":"add a match arm for the missing variant","at":{"file":"src/refund.rd","line":22,"col":3,"len":0},"insert":"| AlreadyRefunded -> ...\n  "}],"docs":"https://radahn.dev/e/0402"}
 ```
 
 **Fix:** add arms for the missing variants or a `_` wildcard.
@@ -378,7 +379,7 @@ fn refund() { ... }   // no module declaration above
 ```
 
 ```json
-{"code":"E0601","severity":"error","message":"missing module header: source files must begin with `module <name>`","span":{"file":"src/refund.rd","line":1,"col":1,"len":0},"suggest":[{"kind":"insert-text","rationale":"declare the module name at the top of the file","at":{"line":1,"col":1},"insert":"module payments.refunds\nend-module\n\n"}],"docs":"https://radahn.dev/e/0601"}
+{"code":"E0601","severity":"error","message":"missing module header: source files must begin with `module <name>`","span":{"file":"src/refund.rd","line":1,"col":1,"len":0},"suggest":[{"kind":"insert-text","rationale":"declare the module name at the top of the file","at":{"file":"src/refund.rd","line":1,"col":1,"len":0},"insert":"module payments.refunds\nend-module\n\n"}],"docs":"https://radahn.dev/e/0601"}
 ```
 
 **Fix:** add a `module <name> ... end-module` header at the top of the file.

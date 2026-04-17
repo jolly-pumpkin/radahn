@@ -28,6 +28,22 @@ const ALLOWED_SUGGESTION_KINDS = new Set([
 	"replace-span",
 	"delete-span",
 ]);
+const INSERT_KINDS = new Set([
+	"add-param",
+	"add-effect",
+	"add-import",
+	"narrow-cap",
+	"insert-text",
+]);
+const REPLACE_KINDS = new Set(["rename", "replace-span"]);
+
+function expectValidSpan(span: Diagnostic["span"]) {
+	expect(typeof span.file).toBe("string");
+	expect(span.file.length).toBeGreaterThan(0);
+	expect(span.line).toBeGreaterThanOrEqual(1);
+	expect(span.col).toBeGreaterThanOrEqual(1);
+	expect(span.len).toBeGreaterThanOrEqual(0);
+}
 
 describe("diagnostic registry", () => {
 	test("has between 15 and 25 codes", () => {
@@ -54,7 +70,7 @@ describe("diagnostic registry", () => {
 			expect(ALLOWED_SEVERITIES).toContain(info.defaultSeverity);
 			expect(info.title.length).toBeGreaterThan(0);
 			expect(info.summary.length).toBeGreaterThan(0);
-			expect(info.docsUrl).toBe(`https://radahn.dev/e/${code.slice(1)}`);
+			expect(info.docs).toBe(`https://radahn.dev/e/${code.slice(1)}`);
 		}
 	});
 });
@@ -72,16 +88,22 @@ describe("diagnostic examples", () => {
 		}
 	});
 
-	test("example docs URL matches registry docsUrl", () => {
+	test("example docs URL matches registry docs", () => {
 		for (const code of DIAGNOSTIC_CODES) {
-			expect(DIAGNOSTIC_EXAMPLES[code].docs).toBe(DIAGNOSTIC_REGISTRY[code].docsUrl);
+			expect(DIAGNOSTIC_EXAMPLES[code].docs).toBe(DIAGNOSTIC_REGISTRY[code].docs);
 		}
 	});
 
-	test("no example uses a code outside the registry", () => {
-		for (const code of Object.keys(DIAGNOSTIC_EXAMPLES)) {
-			expect(DIAGNOSTIC_REGISTRY[code as Diagnostic["code"]]).toBeDefined();
+	test("example severity matches registry default", () => {
+		for (const code of DIAGNOSTIC_CODES) {
+			expect(DIAGNOSTIC_EXAMPLES[code].severity).toBe(DIAGNOSTIC_REGISTRY[code].defaultSeverity);
 		}
+	});
+
+	test("examples set covers exactly the registered codes", () => {
+		const exampleCodes = Object.keys(DIAGNOSTIC_EXAMPLES).sort();
+		const registryCodes = [...DIAGNOSTIC_CODES].sort();
+		expect(exampleCodes).toEqual(registryCodes);
 	});
 });
 
@@ -93,24 +115,47 @@ describe("diagnostic schema shape", () => {
 			expect(ALLOWED_SEVERITIES).toContain(d.severity);
 			expect(d.message.length).toBeGreaterThan(0);
 			expect(d.docs).toMatch(/^https?:\/\//);
-
-			expect(typeof d.span.file).toBe("string");
-			expect(d.span.file.length).toBeGreaterThan(0);
-			expect(d.span.line).toBeGreaterThanOrEqual(1);
-			expect(d.span.col).toBeGreaterThanOrEqual(1);
-			expect(d.span.len).toBeGreaterThanOrEqual(0);
+			expectValidSpan(d.span);
 		}
 	});
 
-	test("suggestions have valid kinds and an edit target", () => {
+	test("suggestion variants enforce their required fields", () => {
 		for (const code of DIAGNOSTIC_CODES) {
 			const d = DIAGNOSTIC_EXAMPLES[code];
 			if (!d.suggest) continue;
 			for (const s of d.suggest) {
 				expect(ALLOWED_SUGGESTION_KINDS.has(s.kind)).toBe(true);
 				expect(s.rationale.length).toBeGreaterThan(0);
-				const hasTarget = s.at !== undefined || s.span !== undefined;
-				expect(hasTarget).toBe(true);
+
+				if (s.kind === "delete-span") {
+					expect("span" in s).toBe(true);
+					expect("insert" in s).toBe(false);
+					expectValidSpan(s.span);
+				} else if (REPLACE_KINDS.has(s.kind)) {
+					expect("span" in s).toBe(true);
+					expect("insert" in s).toBe(true);
+					if ("span" in s) expectValidSpan(s.span);
+					if ("insert" in s) expect(typeof s.insert).toBe("string");
+				} else if (INSERT_KINDS.has(s.kind)) {
+					expect("at" in s).toBe(true);
+					expect("insert" in s).toBe(true);
+					if ("at" in s) expectValidSpan(s.at);
+					if ("insert" in s) expect(typeof s.insert).toBe("string");
+				}
+			}
+		}
+	});
+
+	test("suggestion edit targets always carry a file", () => {
+		// Multi-file diagnostics like E0204 point at a different file than the
+		// primary span; the test guards against regressing to a fileless `at`.
+		for (const code of DIAGNOSTIC_CODES) {
+			const d = DIAGNOSTIC_EXAMPLES[code];
+			if (!d.suggest) continue;
+			for (const s of d.suggest) {
+				const target = "at" in s ? s.at : s.span;
+				expect(typeof target.file).toBe("string");
+				expect(target.file.length).toBeGreaterThan(0);
 			}
 		}
 	});
@@ -121,8 +166,7 @@ describe("diagnostic schema shape", () => {
 			if (!d.related) continue;
 			for (const r of d.related) {
 				expect(r.message.length).toBeGreaterThan(0);
-				expect(r.span.line).toBeGreaterThanOrEqual(1);
-				expect(r.span.col).toBeGreaterThanOrEqual(1);
+				expectValidSpan(r.span);
 			}
 		}
 	});
