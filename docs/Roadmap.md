@@ -60,10 +60,12 @@ Resolve every symbol to a declaration or emit a structured error. This is the fi
 
 Typed AST → runnable TypeScript. Effect annotations and contracts are erased; structural types map 1:1. Output verified by `tsc --noEmit`. Ships *before* effect checking so there's an executable feedback loop from the start — you can run Radahn programs and see runtime behavior while building the checker in 0.7.
 
-- TS code emitter (via `ts-morph` or direct AST construction)
+- TS code emitter (via `ts-morph`)
 - `.d.ts` generation for every module
-- `radahn build` subcommand: `.rd` → `.ts` + `.d.ts`
+- `radahn build` subcommand: `.rd` → `.ts` + `.d.ts`, with `--outdir` flag (default `dist/`)
+- Built-in tsc verification via ts-morph `getPreEmitDiagnostics()`
 - End-to-end test: Radahn source → TS → Bun executes → correct output
+- **Deferred to later epics:** `TryExpr` (`?` operator) emission requires Result types (0.7/0.11); `RangeExpr` (`1..10`) emission requires stdlib range helper (0.11)
 
 ### Epic 0.7 — Type Checking & Effect Checking
 
@@ -75,6 +77,7 @@ The core thesis feature, built on top of a working emitter so every checker rule
 - Diagnostics: "function `f` performs effect `net` but its signature declares `! { log }` — add `net` to the effect row or remove the call"
 - Pure functions (no `!` clause) verified to call only pure functions
 - Type error diagnostics with structured suggestions (wrong argument type, missing field, non-exhaustive match)
+- `TryExpr` (`?` operator) emission: deferred from 0.6, implement once Result type is available
 
 ### Epic 0.8 — TypeScript Interop (`extern`)
 
@@ -109,6 +112,7 @@ Bootstrap corpus so agents (and humans) can write idiomatic Radahn without havin
 - `stdlib/`: `net.rd`, `fs.rd`, `log.rd` — effectful modules. APIs take opaque capability-token parameters that are just marker types in v0 and become real linear capability types in 1.2. Shape is forward-compatible; enforcement arrives in v1.
 - Language guide: grammar cheatsheet, effect-row syntax, capability passing patterns, 3–4 worked examples
 - `examples/`: 5–10 runnable programs covering the v0 feature set
+- `RangeExpr` (`1..10`) emission: deferred from 0.6, implement with stdlib `range()` helper
 
 ### Epic 0.12 — Benchmark Harness & First Results
 
