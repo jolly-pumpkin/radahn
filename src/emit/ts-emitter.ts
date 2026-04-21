@@ -64,8 +64,8 @@ class Emitter {
 		const node = this.arena.get(id);
 		switch (node.kind) {
 			case "FnDecl": this.emitFnDecl(node); break;
-			case "TypeDecl": /* TODO */ break;
-			case "ExternBlock": /* TODO */ break;
+			case "TypeDecl": this.emitTypeDecl(node); break;
+			case "ExternBlock": this.emitExternBlock(node); break;
 			case "Import": break; // erased
 			default: break;
 		}
@@ -346,5 +346,127 @@ class Emitter {
 	private emitBlockExprAsIIFE(node: Extract<AstNode, { kind: "BlockExpr" }>): string {
 		const body = this.emitBlockBody(node.block);
 		return `(() => {\n${body}\n})()`;
+	}
+
+	// --- Type declaration emission ---
+
+	private getTypeParamNames(id: NodeId | null): string[] {
+		if (!id) return [];
+		const node = this.arena.get(id);
+		if (node.kind !== "TypeParams") return [];
+		return node.names;
+	}
+
+	private emitTypeDecl(node: Extract<AstNode, { kind: "TypeDecl" }>): void {
+		const valueNode = this.arena.get(node.value);
+		if (valueNode.kind === "SumType") {
+			this.emitSumType(node, valueNode);
+		} else {
+			// Non-sum type (e.g. refinement type) — emit simple alias
+			const baseType = this.emitType(node.value);
+			const exportKw = node.visibility ? "export " : "";
+			this.sf.addStatements(`${exportKw}type ${node.name} = ${baseType}; // refinement erased`);
+		}
+	}
+
+	private emitSumType(
+		decl: Extract<AstNode, { kind: "TypeDecl" }>,
+		sum: Extract<AstNode, { kind: "SumType" }>,
+	): void {
+		const typeParamNames = this.getTypeParamNames(decl.typeParams);
+		const typeParamSuffix = typeParamNames.length > 0 ? `<${typeParamNames.join(", ")}>` : "";
+		const exportKw = decl.visibility ? "export " : "";
+
+		const variantNames: string[] = [];
+
+		for (const variantId of sum.variants) {
+			const variant = this.arena.get(variantId);
+			if (variant.kind !== "Variant") continue;
+			variantNames.push(variant.name);
+
+			// Emit interface
+			const fields: string[] = [`readonly kind: "${variant.name}"`];
+			if (variant.payloadKind === "positional") {
+				variant.payload.forEach((payloadId, i) => {
+					fields.push(`value_${i}: ${this.emitType(payloadId)}`);
+				});
+			} else if (variant.payloadKind === "named") {
+				variant.payload.forEach(fieldId => {
+					const field = this.arena.get(fieldId);
+					if (field.kind === "Field") {
+						fields.push(`${field.name}: ${this.emitType(field.type)}`);
+					}
+				});
+			}
+
+			this.sf.addStatements(
+				`${exportKw}interface ${variant.name}${typeParamSuffix} { ${fields.join("; ")}; }`
+			);
+		}
+
+		// Emit union type alias
+		const unionMembers = variantNames.map(n => `${n}${typeParamSuffix}`).join(" | ");
+		this.sf.addStatements(`${exportKw}type ${decl.name}${typeParamSuffix} = ${unionMembers};`);
+
+		// Emit factory functions
+		for (const variantId of sum.variants) {
+			const variant = this.arena.get(variantId);
+			if (variant.kind !== "Variant") continue;
+
+			const params: string[] = [];
+			const objFields: string[] = [`kind: "${variant.name}" as const`];
+
+			if (variant.payloadKind === "positional") {
+				variant.payload.forEach((payloadId, i) => {
+					params.push(`value_${i}: ${this.emitType(payloadId)}`);
+					objFields.push(`value_${i}`);
+				});
+			} else if (variant.payloadKind === "named") {
+				variant.payload.forEach(fieldId => {
+					const field = this.arena.get(fieldId);
+					if (field.kind === "Field") {
+						params.push(`${field.name}: ${this.emitType(field.type)}`);
+						objFields.push(field.name);
+					}
+				});
+			}
+
+			const paramStr = params.join(", ");
+			const returnType = `${decl.name}${typeParamSuffix}`;
+			const body = `{ ${objFields.join(", ")} }`;
+			this.sf.addStatements(
+				`${exportKw}function ${variant.name}${typeParamSuffix}(${paramStr}): ${returnType} { return ${body}; }`
+			);
+		}
+	}
+
+	// --- Extern block emission ---
+
+	private emitExternBlock(node: Extract<AstNode, { kind: "ExternBlock" }>): void {
+		const pathNode = this.arena.get(node.path);
+		if (pathNode.kind !== "ModulePath") throw new Error("Expected ModulePath");
+
+		// Build module path string from segments and separators
+		let modulePath = pathNode.segments[0];
+		for (let i = 0; i < pathNode.separators.length; i++) {
+			modulePath += pathNode.separators[i] + pathNode.segments[i + 1];
+		}
+
+		// Collect imported names from extern declarations
+		const names: string[] = [];
+		for (const declId of node.decls) {
+			const decl = this.arena.get(declId);
+			if (decl.kind === "ExternFnDecl") {
+				names.push(decl.name);
+			} else if (decl.kind === "ExternTypeDecl") {
+				names.push(decl.name);
+			}
+		}
+
+		if (names.length > 0) {
+			this.sf.addStatements(
+				`import { ${names.join(", ")} } from "${modulePath}";`
+			);
+		}
 	}
 }
