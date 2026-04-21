@@ -1,10 +1,15 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { emit } from "../src/emit/index";
 import { lex } from "../src/lex/index";
 import { parse } from "../src/parse/index";
 import { resolve } from "../src/resolve/index";
-import { emit } from "../src/emit/index";
 import {
-	HELLO, RESULT, REFINEMENT, LET_AND_BINOP, EXTERN_FS, CONTRACTS
+	CONTRACTS,
+	EXTERN_FS,
+	HELLO,
+	LET_AND_BINOP,
+	REFINEMENT,
+	RESULT,
 } from "./fixtures/conformance";
 
 function compileFixture(source: string): { ts: string; dts: string; errors: number } {
@@ -12,7 +17,7 @@ function compileFixture(source: string): { ts: string; dts: string; errors: numb
 	const parseResult = parse(lexResult.tokens, "fixture.rd");
 	const resolveResult = resolve(parseResult.root, parseResult.arena);
 	const emitResult = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
-	const errors = emitResult.diagnostics.filter(d => d.severity === "error").length;
+	const errors = emitResult.diagnostics.filter((d) => d.severity === "error").length;
 	return { ts: emitResult.ts, dts: emitResult.dts, errors };
 }
 

@@ -1,5 +1,5 @@
-import { describe, test, expect, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 
@@ -15,7 +15,9 @@ describe("end-to-end", () => {
 		rmSync(TMP, { recursive: true, force: true });
 		mkdirSync(TMP, { recursive: true });
 		const srcFile = join(TMP, "hello.rd");
-		writeFileSync(srcFile, `module hello
+		writeFileSync(
+			srcFile,
+			`module hello
 end-module
 
 extern module console {
@@ -27,9 +29,12 @@ fn main() -> () ! { log } {
 }
 
 main()
-`);
+`,
+		);
 
-		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`.quiet().nothrow();
+		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`
+			.quiet()
+			.nothrow();
 		expect(buildResult.exitCode).toBe(0);
 
 		const runResult = await $`bun ${join(OUTDIR, "hello.ts")}`.quiet().nothrow();
@@ -40,7 +45,9 @@ main()
 		rmSync(TMP, { recursive: true, force: true });
 		mkdirSync(TMP, { recursive: true });
 		const srcFile = join(TMP, "sumtype.rd");
-		writeFileSync(srcFile, `module sumtype
+		writeFileSync(
+			srcFile,
+			`module sumtype
 end-module
 
 extern module console {
@@ -58,9 +65,12 @@ fn color_code(c: Color) -> Int {
 }
 
 log(color_code(Green()))
-`);
+`,
+		);
 
-		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`.quiet().nothrow();
+		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`
+			.quiet()
+			.nothrow();
 		expect(buildResult.exitCode).toBe(0);
 
 		const runResult = await $`bun ${join(OUTDIR, "sumtype.ts")}`.quiet().nothrow();
@@ -71,7 +81,9 @@ log(color_code(Green()))
 		rmSync(TMP, { recursive: true, force: true });
 		mkdirSync(TMP, { recursive: true });
 		const srcFile = join(TMP, "generic.rd");
-		writeFileSync(srcFile, `module generic
+		writeFileSync(
+			srcFile,
+			`module generic
 end-module
 
 extern module console {
@@ -83,9 +95,12 @@ fn identity[T](x: T) -> T {
 }
 
 log(identity(42))
-`);
+`,
+		);
 
-		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`.quiet().nothrow();
+		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`
+			.quiet()
+			.nothrow();
 		expect(buildResult.exitCode).toBe(0);
 
 		const runResult = await $`bun ${join(OUTDIR, "generic.ts")}`.quiet().nothrow();
@@ -96,7 +111,9 @@ log(identity(42))
 		rmSync(TMP, { recursive: true, force: true });
 		mkdirSync(TMP, { recursive: true });
 		const srcFile = join(TMP, "ordering.rd");
-		writeFileSync(srcFile, `module ordering
+		writeFileSync(
+			srcFile,
+			`module ordering
 end-module
 
 extern module console {
@@ -112,9 +129,12 @@ fn second() -> Int {
 }
 
 log(first())
-`);
+`,
+		);
 
-		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`.quiet().nothrow();
+		const buildResult = await $`bun src/cli.ts build ${srcFile} --outdir ${OUTDIR}`
+			.quiet()
+			.nothrow();
 		expect(buildResult.exitCode).toBe(0);
 
 		const runResult = await $`bun ${join(OUTDIR, "ordering.ts")}`.quiet().nothrow();

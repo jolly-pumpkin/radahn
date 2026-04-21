@@ -1,5 +1,5 @@
-import { describe, test, expect, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 
@@ -15,7 +15,7 @@ describe("radahn build", () => {
 		mkdirSync(TMP, { recursive: true });
 		const outdir = join(TMP, "dist");
 		const srcFile = join(TMP, "hello.rd");
-		writeFileSync(srcFile, `module hello\nend-module\npub fn greet() -> () {\n}\n`);
+		writeFileSync(srcFile, "module hello\nend-module\npub fn greet() -> () {\n}\n");
 
 		const result = await $`bun src/cli.ts build ${srcFile} --outdir ${outdir}`.quiet();
 		expect(result.exitCode).toBe(0);
@@ -36,7 +36,7 @@ describe("radahn build", () => {
 		rmSync("dist", { recursive: true, force: true });
 		const srcFile = join(TMP, "default.rd");
 		mkdirSync(TMP, { recursive: true });
-		writeFileSync(srcFile, `module default_test\nend-module\nfn f() -> () {\n}\n`);
+		writeFileSync(srcFile, "module default_test\nend-module\nfn f() -> () {\n}\n");
 
 		const result = await $`bun src/cli.ts build ${srcFile}`.quiet();
 		expect(result.exitCode).toBe(0);

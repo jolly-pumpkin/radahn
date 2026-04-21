@@ -2,9 +2,9 @@
 // Implementation: Epic 0.6
 
 import { Project, type SourceFile } from "ts-morph";
-import type { Arena, NodeId } from "../util/arena";
+import type { DiagnosticCode, Diagnostic } from "../diag/types";
 import type { AstNode } from "../parse/ast";
-import type { Diagnostic } from "../diag/types";
+import type { Arena, NodeId } from "../util/arena";
 
 export type EmitResult = {
 	ts: string;
@@ -64,7 +64,7 @@ class Emitter {
 			const messageText = d.getMessageText();
 			const message = typeof messageText === "string" ? messageText : messageText.getMessageText();
 			this.diagnostics.push({
-				code: "E0601" as any,
+				code: "E0601" as DiagnosticCode,
 				severity: "error",
 				message: `TS${d.getCode()}: ${message}`,
 				span: { file: "output.ts", line: 0, col: 0, len: 0 },
@@ -74,7 +74,7 @@ class Emitter {
 
 		// Generate .d.ts via ts-morph
 		const emitOutput = this.project.emitToMemory({ emitOnlyDtsFiles: true });
-		const dtsFile = emitOutput.getFiles().find(f => f.filePath.endsWith(".d.ts"));
+		const dtsFile = emitOutput.getFiles().find((f) => f.filePath.endsWith(".d.ts"));
 		const dts = dtsFile?.text ?? "";
 
 		return { ts, dts, diagnostics: this.diagnostics };
@@ -89,19 +89,27 @@ class Emitter {
 	private emitDecl(id: NodeId): void {
 		const node = this.arena.get(id);
 		switch (node.kind) {
-			case "FnDecl": this.emitFnDecl(node); break;
-			case "TypeDecl": this.emitTypeDecl(node); break;
-			case "ExternBlock": this.emitExternBlock(node); break;
-			case "Import": break; // erased
+			case "FnDecl":
+				this.emitFnDecl(node);
+				break;
+			case "TypeDecl":
+				this.emitTypeDecl(node);
+				break;
+			case "ExternBlock":
+				this.emitExternBlock(node);
+				break;
+			case "Import":
+				break; // erased
 			case "ExprStmt": {
-				this.sf.addStatements(this.emitExpr(node.expr) + ";");
+				this.sf.addStatements(`${this.emitExpr(node.expr)};`);
 				break;
 			}
 			case "LetStmt": {
 				this.sf.addStatements(this.emitLetStmt(node));
 				break;
 			}
-			default: break;
+			default:
+				break;
 		}
 	}
 
@@ -114,17 +122,17 @@ class Emitter {
 				const name = node.segments.join(".");
 				const mapped = this.mapTypeName(name);
 				if (node.typeArgs.length === 0) return mapped;
-				const args = node.typeArgs.map(a => this.emitType(a)).join(", ");
+				const args = node.typeArgs.map((a) => this.emitType(a)).join(", ");
 				return `${mapped}<${args}>`;
 			}
 			case "VoidType":
 				return "void";
 			case "TupleType": {
-				const elems = node.elements.map(e => this.emitType(e)).join(", ");
+				const elems = node.elements.map((e) => this.emitType(e)).join(", ");
 				return `[${elems}]`;
 			}
 			case "RecordType": {
-				const fields = node.fields.map(f => {
+				const fields = node.fields.map((f) => {
 					const field = this.arena.get(f);
 					if (field.kind !== "Field") throw new Error("Expected Field");
 					return `${field.name}: ${this.emitType(field.type)}`;
@@ -145,12 +153,18 @@ class Emitter {
 
 	private mapTypeName(name: string): string {
 		switch (name) {
-			case "Int": return "number";
-			case "Float": return "number";
-			case "String": return "string";
-			case "Bool": return "boolean";
-			case "List": return "Array";
-			default: return name;
+			case "Int":
+				return "number";
+			case "Float":
+				return "number";
+			case "String":
+				return "string";
+			case "Bool":
+				return "boolean";
+			case "List":
+				return "Array";
+			default:
+				return name;
 		}
 	}
 
@@ -165,7 +179,7 @@ class Emitter {
 			isExported: node.visibility,
 			returnType,
 			typeParameters: typeParamNames.length > 0 ? typeParamNames : undefined,
-			parameters: node.params.map(p => {
+			parameters: node.params.map((p) => {
 				const param = this.arena.get(p);
 				if (param.kind !== "Param") throw new Error("Expected Param");
 				return { name: param.name, type: this.emitType(param.type) };
@@ -240,7 +254,7 @@ class Emitter {
 				return `${node.op}${this.emitExpr(node.operand)}`;
 			case "CallExpr": {
 				const callee = this.emitExpr(node.callee);
-				const args = node.args.map(a => this.emitExpr(a)).join(", ");
+				const args = node.args.map((a) => this.emitExpr(a)).join(", ");
 				return `${callee}(${args})`;
 			}
 			case "FieldAccess":
@@ -252,13 +266,13 @@ class Emitter {
 			case "MatchExpr":
 				return this.emitMatchExpr(node);
 			case "TupleExpr": {
-				const elems = node.elements.map(e => this.emitExpr(e)).join(", ");
+				const elems = node.elements.map((e) => this.emitExpr(e)).join(", ");
 				return `[${elems}]`;
 			}
 			case "RecordExpr":
 				return this.emitRecordExpr(node);
 			case "ListExpr": {
-				const elems = node.elements.map(e => this.emitExpr(e)).join(", ");
+				const elems = node.elements.map((e) => this.emitExpr(e)).join(", ");
 				return `[${elems}]`;
 			}
 			case "BlockExpr":
@@ -270,7 +284,7 @@ class Emitter {
 			case "TurbofishExpr":
 				return this.emitExpr(node.expr);
 			case "RangeExpr":
-				return `/* TODO: RangeExpr */`;
+				return "/* TODO: RangeExpr */";
 			default:
 				return `/* unsupported expr: ${(node as AstNode).kind} */`;
 		}
@@ -285,10 +299,14 @@ class Emitter {
 
 	private mapBinaryOp(op: string): string {
 		switch (op) {
-			case "++": return "+";
-			case "==": return "===";
-			case "!=": return "!==";
-			default: return op;
+			case "++":
+				return "+";
+			case "==":
+				return "===";
+			case "!=":
+				return "!==";
+			default:
+				return op;
 		}
 	}
 
@@ -310,7 +328,8 @@ class Emitter {
 			if (stmt.kind === "ExprStmt") return this.emitExpr(stmt.expr);
 		}
 		if (node.kind === "Block") {
-			return this.emitBlockExprAsIIFE({ kind: "BlockExpr", span: node.span, block: id } as any);
+			const body = this.emitBlockBody(id);
+			return `(() => {\n${body}\n})()`;
 		}
 		return this.emitExpr(id);
 	}
@@ -318,15 +337,15 @@ class Emitter {
 	private emitBranchBody(id: NodeId): string {
 		const node = this.arena.get(id);
 		if (node.kind === "Block") {
-			return node.stmts.map(s => this.emitStmt(s)).join("\n");
+			return node.stmts.map((s) => this.emitStmt(s)).join("\n");
 		}
-		return this.emitExpr(id) + ";";
+		return `${this.emitExpr(id)};`;
 	}
 
 	private emitMatchExpr(node: Extract<AstNode, { kind: "MatchExpr" }>): string {
 		const scrutinee = this.emitExpr(node.scrutinee);
 		const tmpVar = `_match${this.matchCounter++}`;
-		const arms = node.arms.map(armId => {
+		const arms = node.arms.map((armId) => {
 			const arm = this.arena.get(armId);
 			if (arm.kind !== "MatchArm") throw new Error("Expected MatchArm");
 			return this.emitMatchArm(arm, tmpVar);
@@ -341,11 +360,14 @@ class Emitter {
 
 		switch (pattern.kind) {
 			case "CtorPat": {
-				const bindings = pattern.args.map((argId, i) => {
-					const arg = this.arena.get(argId);
-					if (arg.kind === "BindingPat") return `const ${arg.name} = ${scrutinee}.value_${i};`;
-					return "";
-				}).filter(Boolean).join(" ");
+				const bindings = pattern.args
+					.map((argId, i) => {
+						const arg = this.arena.get(argId);
+						if (arg.kind === "BindingPat") return `const ${arg.name} = ${scrutinee}.value_${i};`;
+						return "";
+					})
+					.filter(Boolean)
+					.join(" ");
 				return `if (${scrutinee}.kind === "${pattern.name}"${guard}) { ${bindings} return ${body}; }`;
 			}
 			case "LiteralPat":
@@ -355,11 +377,14 @@ class Emitter {
 			case "BindingPat":
 				return `{ const ${pattern.name} = ${scrutinee}; return ${body}; }`;
 			case "TuplePat": {
-				const bindings = pattern.elements.map((elemId, i) => {
-					const elem = this.arena.get(elemId);
-					if (elem.kind === "BindingPat") return `const ${elem.name} = ${scrutinee}[${i}];`;
-					return "";
-				}).filter(Boolean).join(" ");
+				const bindings = pattern.elements
+					.map((elemId, i) => {
+						const elem = this.arena.get(elemId);
+						if (elem.kind === "BindingPat") return `const ${elem.name} = ${scrutinee}[${i}];`;
+						return "";
+					})
+					.filter(Boolean)
+					.join(" ");
 				return `{ ${bindings} return ${body}; }`;
 			}
 			default:
@@ -368,13 +393,13 @@ class Emitter {
 	}
 
 	private emitRecordExpr(node: Extract<AstNode, { kind: "RecordExpr" }>): string {
-		const fields = node.fields.map(fId => {
+		const fields = node.fields.map((fId) => {
 			const field = this.arena.get(fId);
 			if (field.kind === "RecordInit") {
 				if (field.value) return `${field.name}: ${this.emitExpr(field.value)}`;
 				return field.name;
 			}
-			return `/* unknown field kind */`;
+			return "/* unknown field kind */";
 		});
 		return `{ ${fields.join(", ")} }`;
 	}
@@ -425,25 +450,25 @@ class Emitter {
 			// Emit interface
 			const fields: string[] = [`readonly kind: "${variant.name}"`];
 			if (variant.payloadKind === "positional") {
-				variant.payload.forEach((payloadId, i) => {
-					fields.push(`value_${i}: ${this.emitType(payloadId)}`);
-				});
+				for (let i = 0; i < variant.payload.length; i++) {
+					fields.push(`value_${i}: ${this.emitType(variant.payload[i])}`);
+				}
 			} else if (variant.payloadKind === "named") {
-				variant.payload.forEach(fieldId => {
+				for (const fieldId of variant.payload) {
 					const field = this.arena.get(fieldId);
 					if (field.kind === "Field") {
 						fields.push(`${field.name}: ${this.emitType(field.type)}`);
 					}
-				});
+				}
 			}
 
 			this.sf.addStatements(
-				`${exportKw}interface ${variant.name}${typeParamSuffix} { ${fields.join("; ")}; }`
+				`${exportKw}interface ${variant.name}${typeParamSuffix} { ${fields.join("; ")}; }`,
 			);
 		}
 
 		// Emit union type alias
-		const unionMembers = variantNames.map(n => `${n}${typeParamSuffix}`).join(" | ");
+		const unionMembers = variantNames.map((n) => `${n}${typeParamSuffix}`).join(" | ");
 		this.sf.addStatements(`${exportKw}type ${decl.name}${typeParamSuffix} = ${unionMembers};`);
 
 		// Emit factory functions
@@ -455,25 +480,25 @@ class Emitter {
 			const objFields: string[] = [`kind: "${variant.name}" as const`];
 
 			if (variant.payloadKind === "positional") {
-				variant.payload.forEach((payloadId, i) => {
-					params.push(`value_${i}: ${this.emitType(payloadId)}`);
+				for (let i = 0; i < variant.payload.length; i++) {
+					params.push(`value_${i}: ${this.emitType(variant.payload[i])}`);
 					objFields.push(`value_${i}`);
-				});
+				}
 			} else if (variant.payloadKind === "named") {
-				variant.payload.forEach(fieldId => {
+				for (const fieldId of variant.payload) {
 					const field = this.arena.get(fieldId);
 					if (field.kind === "Field") {
 						params.push(`${field.name}: ${this.emitType(field.type)}`);
 						objFields.push(field.name);
 					}
-				});
+				}
 			}
 
 			const paramStr = params.join(", ");
 			const returnType = `${decl.name}${typeParamSuffix}`;
 			const body = `{ ${objFields.join(", ")} }`;
 			this.sf.addStatements(
-				`${exportKw}function ${variant.name}${typeParamSuffix}(${paramStr}): ${returnType} { return ${body}; }`
+				`${exportKw}function ${variant.name}${typeParamSuffix}(${paramStr}): ${returnType} { return ${body}; }`,
 			);
 		}
 	}
@@ -502,9 +527,7 @@ class Emitter {
 		}
 
 		if (names.length > 0) {
-			this.sf.addStatements(
-				`import { ${names.join(", ")} } from "${modulePath}";`
-			);
+			this.sf.addStatements(`import { ${names.join(", ")} } from "${modulePath}";`);
 		}
 	}
 }
