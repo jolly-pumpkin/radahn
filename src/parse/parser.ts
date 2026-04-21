@@ -273,9 +273,36 @@ class Parser {
 			return null;
 		}
 
-		this.error("E0101", `expected declaration (fn, type, import, extern), got \`${tok.kind}\``, tok.span);
-		this.synchronize();
-		return null;
+		// Top-level let binding
+		if (this.check("let")) {
+			if (visibility) {
+				this.error("E0101", "`let` at top level cannot have visibility modifier", this.currentSpan());
+			}
+			return this.parseLetStmt();
+		}
+
+		// Top-level expression statement (e.g., function calls)
+		if (visibility) {
+			this.error("E0101", `expected declaration (fn, type, import, extern), got \`${tok.kind}\``, tok.span);
+			this.synchronize();
+			return null;
+		}
+
+		// Try parsing as a top-level expression statement
+		try {
+			const start = this.currentSpan();
+			const expr = this.parseExpr();
+			this.skipNewlines();
+			return this.arena.alloc({
+				kind: "ExprStmt",
+				span: this.spanFrom(start),
+				expr,
+			});
+		} catch {
+			this.error("E0101", `expected declaration (fn, type, import, extern), got \`${tok.kind}\``, tok.span);
+			this.synchronize();
+			return null;
+		}
 	}
 
 	private parseImport(): NodeId {

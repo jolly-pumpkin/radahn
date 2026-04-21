@@ -27,6 +27,7 @@ class Emitter {
 	private project: Project;
 	private sf!: SourceFile;
 	private diagnostics: Diagnostic[] = [];
+	private matchCounter = 0;
 
 	constructor(arena: Arena<AstNode>, resolutions: Map<NodeId, NodeId>) {
 		this.arena = arena;
@@ -50,6 +51,27 @@ class Emitter {
 
 		const ts = this.sf.getFullText();
 
+		// Run tsc verification via ts-morph diagnostics
+		// Skip TS2304 (cannot find name) and TS2307 (cannot find module) since
+		// Radahn emits single files without their full dependency graph.
+		// 2304: cannot find name (external types not in scope)
+		// 2307: cannot find module (external modules not resolvable)
+		// 2591: cannot find name 'console' (no @types/node in memory FS)
+		const SKIP_TS_CODES = new Set([2304, 2307, 2591]);
+		const tsDiags = this.project.getPreEmitDiagnostics();
+		for (const d of tsDiags) {
+			if (SKIP_TS_CODES.has(d.getCode())) continue;
+			const messageText = d.getMessageText();
+			const message = typeof messageText === "string" ? messageText : messageText.getMessageText();
+			this.diagnostics.push({
+				code: "E0601" as any,
+				severity: "error",
+				message: `TS${d.getCode()}: ${message}`,
+				span: { file: "output.ts", line: 0, col: 0, len: 0 },
+				docs: "https://radahn.dev/e/E0601",
+			});
+		}
+
 		// Generate .d.ts via ts-morph
 		const emitOutput = this.project.emitToMemory({ emitOnlyDtsFiles: true });
 		const dtsFile = emitOutput.getFiles().find(f => f.filePath.endsWith(".d.ts"));
@@ -71,6 +93,14 @@ class Emitter {
 			case "TypeDecl": this.emitTypeDecl(node); break;
 			case "ExternBlock": this.emitExternBlock(node); break;
 			case "Import": break; // erased
+			case "ExprStmt": {
+				this.sf.addStatements(this.emitExpr(node.expr) + ";");
+				break;
+			}
+			case "LetStmt": {
+				this.sf.addStatements(this.emitLetStmt(node));
+				break;
+			}
 			default: break;
 		}
 	}
@@ -128,11 +158,13 @@ class Emitter {
 
 	private emitFnDecl(node: Extract<AstNode, { kind: "FnDecl" }>): void {
 		const returnType = node.returnType ? this.emitType(node.returnType) : "void";
+		const typeParamNames = this.getTypeParamNames(node.typeParams);
 
 		const fn = this.sf.addFunction({
 			name: node.name,
 			isExported: node.visibility,
 			returnType,
+			typeParameters: typeParamNames.length > 0 ? typeParamNames : undefined,
 			parameters: node.params.map(p => {
 				const param = this.arena.get(p);
 				if (param.kind !== "Param") throw new Error("Expected Param");
@@ -293,7 +325,7 @@ class Emitter {
 
 	private emitMatchExpr(node: Extract<AstNode, { kind: "MatchExpr" }>): string {
 		const scrutinee = this.emitExpr(node.scrutinee);
-		const tmpVar = `_match${Date.now()}`;
+		const tmpVar = `_match${this.matchCounter++}`;
 		const arms = node.arms.map(armId => {
 			const arm = this.arena.get(armId);
 			if (arm.kind !== "MatchArm") throw new Error("Expected MatchArm");
@@ -369,7 +401,9 @@ class Emitter {
 			// Non-sum type (e.g. refinement type) — emit simple alias
 			const baseType = this.emitType(node.value);
 			const exportKw = node.visibility ? "export " : "";
-			this.sf.addStatements(`${exportKw}type ${node.name} = ${baseType}; // refinement erased`);
+			const typeParamNames = this.getTypeParamNames(node.typeParams);
+			const typeParamSuffix = typeParamNames.length > 0 ? `<${typeParamNames.join(", ")}>` : "";
+			this.sf.addStatements(`${exportKw}type ${node.name}${typeParamSuffix} = ${baseType};`);
 		}
 	}
 

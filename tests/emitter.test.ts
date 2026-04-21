@@ -235,3 +235,38 @@ describe("misc expressions", () => {
 		expect(ts).toContain("x.a");
 	});
 });
+
+describe("tsc verification", () => {
+	test("valid emitted code produces no diagnostics", () => {
+		const source = `module t\nend-module\npub fn add(a: Int, b: Int) -> Int {\n  a + b\n}`;
+		const lexResult = lex(source, "test.rd");
+		const parseResult = parse(lexResult.tokens, "test.rd");
+		const resolveResult = resolve(parseResult.root, parseResult.arena);
+		const result = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
+		const errors = result.diagnostics.filter(d => d.severity === "error");
+		expect(errors).toHaveLength(0);
+	});
+});
+
+describe("error handling", () => {
+	test("emitter handles empty file gracefully", () => {
+		const source = `module t\nend-module`;
+		const lexResult = lex(source, "test.rd");
+		const parseResult = parse(lexResult.tokens, "test.rd");
+		const resolveResult = resolve(parseResult.root, parseResult.arena);
+		const result = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
+		expect(result.ts).toBeDefined();
+		const errors = result.diagnostics.filter(d => d.severity === "error");
+		expect(errors).toHaveLength(0);
+	});
+
+	test("deferred TryExpr emits TODO comment without crashing", () => {
+		const ts = rd2ts(`module t\nend-module\nfn f(x: Int) -> Int {\n  x?\n}`);
+		expect(ts).toContain("TODO");
+	});
+
+	test("deferred RangeExpr emits TODO comment without crashing", () => {
+		const ts = rd2ts(`module t\nend-module\nfn f() -> Int {\n  1..10\n}`);
+		expect(ts).toContain("TODO");
+	});
+});

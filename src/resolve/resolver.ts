@@ -41,12 +41,28 @@ class Resolver {
 		this.arena = arena;
 	}
 
+	/** Seed a scope with Radahn's built-in primitive type names. */
+	private seedBuiltins(scope: Scope): void {
+		const builtinSpan: Span = { file: "<builtin>", line: 0, col: 0, len: 0 };
+		// Use -1 as a sentinel NodeId for built-in declarations
+		const sentinel = -1 as NodeId;
+		for (const name of ["Int", "Float", "String", "Bool", "List", "Result", "Error"]) {
+			scope.define({
+				name,
+				kind: "type",
+				declNode: sentinel,
+				span: builtinSpan,
+			});
+		}
+	}
+
 	run(root: NodeId): void {
 		const fileNode = this.arena.get(root);
 		if (fileNode.kind !== "File") return;
 
-		// Create module scope
+		// Create module scope with built-in types pre-seeded
 		const moduleScope = new Scope(null);
+		this.seedBuiltins(moduleScope);
 
 		// Pass 1: collect declarations
 		for (const declId of fileNode.decls) {
