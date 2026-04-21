@@ -179,3 +179,59 @@ describe("match expressions", () => {
 		expect(ts).toContain("return 0");
 	});
 });
+
+describe(".d.ts generation", () => {
+	test("generates declaration file for exported function", () => {
+		const source = `module t\nend-module\npub fn add(a: Int, b: Int) -> Int {\n  a + b\n}`;
+		const lexResult = lex(source, "test.rd");
+		const parseResult = parse(lexResult.tokens, "test.rd");
+		const resolveResult = resolve(parseResult.root, parseResult.arena);
+		const result = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
+		expect(result.dts).toContain("export declare function add");
+		expect(result.dts).toContain("number");
+	});
+
+	test("dts includes exported types", () => {
+		const source = `module t\nend-module\npub type Color = | Red | Green | Blue`;
+		const lexResult = lex(source, "test.rd");
+		const parseResult = parse(lexResult.tokens, "test.rd");
+		const resolveResult = resolve(parseResult.root, parseResult.arena);
+		const result = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
+		expect(result.dts).toContain("export type Color");
+	});
+
+	test("non-exported items not marked export in dts", () => {
+		const source = `module t\nend-module\nfn helper() -> Int {\n  42\n}`;
+		const lexResult = lex(source, "test.rd");
+		const parseResult = parse(lexResult.tokens, "test.rd");
+		const resolveResult = resolve(parseResult.root, parseResult.arena);
+		const result = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
+		expect(result.dts).not.toContain("export");
+		expect(result.dts).toContain("declare function helper");
+	});
+});
+
+describe("record expressions", () => {
+	test("record literal emits object", () => {
+		const ts = rd2ts(`module t\nend-module\nfn f() -> { x: Int, y: Int } {\n  { x: 1, y: 2 }\n}`);
+		expect(ts).toContain("x:");
+		expect(ts).toContain("y:");
+	});
+});
+
+describe("misc expressions", () => {
+	test("void literal emits undefined", () => {
+		const ts = rd2ts(`module t\nend-module\nfn f() -> () {\n  ()\n}`);
+		expect(ts).toContain("undefined");
+	});
+
+	test("list literal emits array", () => {
+		const ts = rd2ts(`module t\nend-module\nfn f() -> List[Int] {\n  [1, 2, 3]\n}`);
+		expect(ts).toContain("[1, 2, 3]");
+	});
+
+	test("field access passes through", () => {
+		const ts = rd2ts(`module t\nend-module\nfn f(x: { a: Int }) -> Int {\n  x.a\n}`);
+		expect(ts).toContain("x.a");
+	});
+});

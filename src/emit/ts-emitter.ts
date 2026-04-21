@@ -47,11 +47,15 @@ class Emitter {
 		if (file.kind !== "File") throw new Error("Expected File node at root");
 		this.sf = this.project.createSourceFile("output.ts", "");
 		this.emitFile(file);
-		return {
-			ts: this.sf.getFullText(),
-			dts: "",
-			diagnostics: this.diagnostics,
-		};
+
+		const ts = this.sf.getFullText();
+
+		// Generate .d.ts via ts-morph
+		const emitOutput = this.project.emitToMemory({ emitOnlyDtsFiles: true });
+		const dtsFile = emitOutput.getFiles().find(f => f.filePath.endsWith(".d.ts"));
+		const dts = dtsFile?.text ?? "";
+
+		return { ts, dts, diagnostics: this.diagnostics };
 	}
 
 	private emitFile(file: Extract<AstNode, { kind: "File" }>): void {

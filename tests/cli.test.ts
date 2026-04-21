@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 const CLI_ENTRY = "src/cli.ts";
 const SUBCOMMANDS = ["check", "build", "fmt", "contract", "summary", "locate"];
-const STUB_COMMANDS = ["build", "fmt", "contract", "summary", "locate"];
+const STUB_COMMANDS = ["fmt", "contract", "summary", "locate"];
 
 async function run(...args: string[]) {
 	const proc = Bun.spawn(["bun", "run", CLI_ENTRY, ...args], {
