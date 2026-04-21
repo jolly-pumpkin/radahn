@@ -444,7 +444,7 @@ class Resolver {
 			case "FloatLit":
 			case "StringLit":
 			case "BoolLit":
-			case "UnitLit":
+			case "VoidLit":
 				break;
 
 			// Type/declaration nodes that shouldn't appear in expression position
@@ -685,7 +685,7 @@ class Resolver {
 					}
 				}
 				break;
-			case "UnitType":
+			case "VoidType":
 				break;
 			default:
 				break;
