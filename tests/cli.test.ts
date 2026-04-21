@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 const CLI_ENTRY = "src/cli.ts";
 const SUBCOMMANDS = ["check", "build", "fmt", "contract", "summary", "locate"];
+const STUB_COMMANDS = ["build", "fmt", "contract", "summary", "locate"];
 
 async function run(...args: string[]) {
 	const proc = Bun.spawn(["bun", "run", CLI_ENTRY, ...args], {
@@ -30,7 +31,7 @@ describe("radahn CLI", () => {
 	});
 
 	describe("subcommand stubs", () => {
-		for (const cmd of SUBCOMMANDS) {
+		for (const cmd of STUB_COMMANDS) {
 			const needsArg = ["contract", "summary", "locate"].includes(cmd);
 
 			test(`${cmd} prints stub message`, async () => {
@@ -49,5 +50,19 @@ describe("radahn CLI", () => {
 				expect(parsed.command).toBe(cmd);
 			});
 		}
+	});
+
+	describe("check command", () => {
+		test("check with no files exits 1", async () => {
+			const { exitCode, stderr } = await run("check");
+			expect(exitCode).toBe(1);
+			expect(stderr).toContain("no input files");
+		});
+
+		test("check with missing file exits 1", async () => {
+			const { exitCode, stderr } = await run("check", "nonexistent.rd");
+			expect(exitCode).toBe(1);
+			expect(stderr).toContain("cannot read file");
+		});
 	});
 });
