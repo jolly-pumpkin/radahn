@@ -9,3 +9,5 @@ export {
 } from "./types";
 export { typeCheck } from "./typer";
 export type { TypeCheckResult } from "./typer";
+export { checkExhaustiveness } from "./exhaustive";
+export type { CheckPattern, ExhaustivenessResult } from "./exhaustive";

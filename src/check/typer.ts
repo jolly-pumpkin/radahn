@@ -23,6 +23,10 @@ import {
 	substituteType,
 	unify,
 } from "./types";
+import {
+	type CheckPattern,
+	checkExhaustiveness,
+} from "./exhaustive";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -302,6 +306,9 @@ class Typer {
 				break;
 			case "IfExpr":
 				ty = this.checkIf(nodeId, node, env);
+				break;
+			case "MatchExpr":
+				ty = this.checkMatch(nodeId, node, env);
 				break;
 			default:
 				// Unhandled expression kinds — return ERROR_TYPE (no cascading)
@@ -640,6 +647,270 @@ class Typer {
 		}
 
 		return isError(thenType) ? elseType : thenType;
+	}
+
+	// -------------------------------------------------------------------
+	// Match expressions
+	// -------------------------------------------------------------------
+
+	private checkMatch(
+		_nodeId: NodeId,
+		node: Extract<AstNode, { kind: "MatchExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const scrutineeType = this.checkExpr(node.scrutinee, env);
+		if (isError(scrutineeType)) return ERROR_TYPE;
+
+		// Build variant info from the scrutinee type
+		const variantInfo = this.getVariantInfo(scrutineeType);
+
+		// Process each arm
+		const armPatterns: { pattern: CheckPattern; hasGuard: boolean }[] = [];
+		const bodyTypes: Type[] = [];
+
+		for (const armId of node.arms) {
+			const arm = this.arena.get(armId);
+			if (arm.kind !== "MatchArm") continue;
+
+			// Convert AST pattern to CheckPattern
+			const checkPat = this.astPatternToCheckPattern(arm.pattern, scrutineeType);
+
+			// Create a new env scope for this arm's pattern bindings
+			const armEnv = new Map(env);
+			this.bindMatchPattern(arm.pattern, scrutineeType, armEnv);
+
+			// Check guard expression (must be Bool)
+			const hasGuard = arm.guard !== null;
+			if (arm.guard !== null) {
+				const guardType = this.checkExpr(arm.guard, armEnv);
+				if (!isError(guardType) && guardType.kind !== "bool") {
+					this.emitTypeMismatch(BOOL, guardType, this.arena.get(arm.guard).span);
+				}
+			}
+
+			// Check body
+			const bodyType = this.checkNode(arm.body, armEnv);
+			bodyTypes.push(bodyType);
+
+			armPatterns.push({ pattern: checkPat, hasGuard });
+		}
+
+		// Run exhaustiveness check
+		const result = checkExhaustiveness(scrutineeType, armPatterns, variantInfo);
+
+		// Emit E0402 for missing patterns
+		if (result.missing.length > 0) {
+			const missingStr = result.missing.join(", ");
+			this.diagnostics.push({
+				code: "E0402",
+				severity: "error",
+				message: `non-exhaustive match: missing pattern(s) ${missingStr}`,
+				span: node.span,
+				docs: DIAGNOSTIC_REGISTRY.E0402.docs,
+			});
+		}
+
+		// Emit E0403 for unreachable arms
+		for (const idx of result.unreachable) {
+			const armId = node.arms[idx];
+			const armNode = this.arena.get(armId);
+			this.diagnostics.push({
+				code: "E0403",
+				severity: "warning",
+				message: "unreachable match arm",
+				span: armNode.span,
+				docs: DIAGNOSTIC_REGISTRY.E0403.docs,
+			});
+		}
+
+		// Verify all arm body types match
+		if (bodyTypes.length === 0) return VOID;
+
+		let resultType = bodyTypes[0];
+		for (let i = 1; i < bodyTypes.length; i++) {
+			if (isError(bodyTypes[i])) continue;
+			if (isError(resultType)) {
+				resultType = bodyTypes[i];
+				continue;
+			}
+			if (!typesEqual(resultType, bodyTypes[i])) {
+				const armId = node.arms[i];
+				const armNode = this.arena.get(armId);
+				if (armNode.kind === "MatchArm") {
+					this.emitTypeMismatch(resultType, bodyTypes[i], this.arena.get(armNode.body).span);
+				}
+			}
+		}
+
+		return isError(resultType) && bodyTypes.length > 1
+			? bodyTypes.find((t) => !isError(t)) ?? ERROR_TYPE
+			: resultType;
+	}
+
+	/**
+	 * Get variant info for the scrutinee type.
+	 * For ADTs (nominal types backed by SumType), returns variant name -> arity.
+	 * For Bool, returns hardcoded true/false variants.
+	 * For infinite types (Int, Float, String), returns empty map.
+	 */
+	private getVariantInfo(scrutineeType: Type): Map<string, number> {
+		const info = new Map<string, number>();
+
+		if (scrutineeType.kind === "bool") {
+			info.set("true", 0);
+			info.set("false", 0);
+			return info;
+		}
+
+		if (scrutineeType.kind === "nominal") {
+			const declId = scrutineeType.declNode;
+			if ((declId as number) === -1) return info;
+
+			const declNode = this.arena.get(declId);
+			if (declNode.kind !== "TypeDecl") return info;
+
+			const valueNode = this.arena.get(declNode.value);
+			if (valueNode.kind !== "SumType") return info;
+
+			for (const variantId of valueNode.variants) {
+				const variant = this.arena.get(variantId);
+				if (variant.kind === "Variant") {
+					info.set(variant.name, variant.payload.length);
+				}
+			}
+			return info;
+		}
+
+		// Int, Float, String — infinite types, return empty map
+		return info;
+	}
+
+	/**
+	 * Convert an AST pattern node into a CheckPattern for the exhaustiveness checker.
+	 */
+	private astPatternToCheckPattern(patId: NodeId, scrutineeType: Type): CheckPattern {
+		const pat = this.arena.get(patId);
+		switch (pat.kind) {
+			case "WildcardPat":
+				return { kind: "wildcard" };
+
+			case "BindingPat": {
+				// Check if this binding name matches a known variant of the scrutinee type.
+				// The parser produces BindingPat for nullary constructors like `Red`.
+				const variantInfo = this.getVariantInfo(scrutineeType);
+				if (variantInfo.has(pat.name)) {
+					return { kind: "ctor", name: pat.name, args: [] };
+				}
+				// Otherwise it's a true binding, equivalent to wildcard for coverage
+				return { kind: "wildcard" };
+			}
+
+			case "CtorPat": {
+				const args = pat.args.map((argId) =>
+					this.astPatternToCheckPattern(argId, scrutineeType),
+				);
+				return { kind: "ctor", name: pat.name, args };
+			}
+
+			case "LiteralPat": {
+				if (pat.litKind === "bool") {
+					// Bool literals become constructors for exhaustiveness
+					return { kind: "ctor", name: pat.value, args: [] };
+				}
+				// Non-bool literals
+				return { kind: "literal", value: pat.value };
+			}
+
+			case "TuplePat": {
+				const elements = pat.elements.map((elemId) =>
+					this.astPatternToCheckPattern(elemId, scrutineeType),
+				);
+				// Treat tuple as a single constructor with args
+				return { kind: "ctor", name: "()", args: elements };
+			}
+
+			case "RecordPat": {
+				// Treat record pattern as wildcard for now (v0 simplification)
+				return { kind: "wildcard" };
+			}
+
+			default:
+				return { kind: "wildcard" };
+		}
+	}
+
+	/**
+	 * Bind pattern variables into the environment for type checking the arm body.
+	 * This extends the typer's existing bindPattern to handle match-specific patterns.
+	 */
+	private bindMatchPattern(patId: NodeId, scrutineeType: Type, env: Map<string, Type>): void {
+		const pat = this.arena.get(patId);
+		switch (pat.kind) {
+			case "BindingPat": {
+				if (pat.name === "<error>") break;
+				// If the name matches a known variant, don't bind it as a variable
+				const variantInfo = this.getVariantInfo(scrutineeType);
+				if (variantInfo.has(pat.name)) break;
+				env.set(pat.name, scrutineeType);
+				break;
+			}
+
+			case "WildcardPat":
+				break;
+
+			case "CtorPat": {
+				// Look up variant payload types from the scrutinee's type declaration
+				const payloadTypes = this.getCtorPayloadTypes(pat.name, scrutineeType);
+				for (let i = 0; i < pat.args.length; i++) {
+					const argType = i < payloadTypes.length ? payloadTypes[i] : ERROR_TYPE;
+					this.bindMatchPattern(pat.args[i], argType, env);
+				}
+				break;
+			}
+
+			case "LiteralPat":
+				break;
+
+			case "TuplePat":
+				if (scrutineeType.kind === "tuple") {
+					for (let i = 0; i < pat.elements.length; i++) {
+						const elemType =
+							i < scrutineeType.elements.length ? scrutineeType.elements[i] : ERROR_TYPE;
+						this.bindMatchPattern(pat.elements[i], elemType, env);
+					}
+				}
+				break;
+
+			case "RecordPat":
+				// v0: not binding record pattern fields yet
+				break;
+
+			default:
+				break;
+		}
+	}
+
+	/**
+	 * Get the payload types for a constructor variant within a sum type.
+	 */
+	private getCtorPayloadTypes(ctorName: string, scrutineeType: Type): Type[] {
+		if (scrutineeType.kind !== "nominal") return [];
+		const declId = scrutineeType.declNode;
+		if ((declId as number) === -1) return [];
+
+		const declNode = this.arena.get(declId);
+		if (declNode.kind !== "TypeDecl") return [];
+
+		const valueNode = this.arena.get(declNode.value);
+		if (valueNode.kind !== "SumType") return [];
+
+		for (const variantId of valueNode.variants) {
+			const variant = this.arena.get(variantId);
+			if (variant.kind === "Variant" && variant.name === ctorName) {
+				return variant.payload.map((payloadId) => this.resolveTypeNode(payloadId));
+			}
+		}
+		return [];
 	}
 
 	// -------------------------------------------------------------------
