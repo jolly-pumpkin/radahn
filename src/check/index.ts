@@ -7,3 +7,5 @@ export {
 	freshTypeVar, freshEffectVar, resetVarCounter,
 	substituteType, unify,
 } from "./types";
+export { typeCheck } from "./typer";
+export type { TypeCheckResult } from "./typer";
