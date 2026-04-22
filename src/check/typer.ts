@@ -15,6 +15,7 @@ import {
 	BOOL,
 	VOID,
 	ERROR_TYPE,
+	BUILTIN_DECL_NODE,
 	PURE,
 	isError,
 	typesEqual,
@@ -309,6 +310,18 @@ class Typer {
 				break;
 			case "MatchExpr":
 				ty = this.checkMatch(nodeId, node, env);
+				break;
+			case "FieldAccess":
+				ty = this.checkFieldAccess(node, env);
+				break;
+			case "RecordExpr":
+				ty = this.checkRecordExpr(node, env);
+				break;
+			case "TupleExpr":
+				ty = this.checkTupleExpr(node, env);
+				break;
+			case "ListExpr":
+				ty = this.checkListExpr(node, env);
 				break;
 			default:
 				// Unhandled expression kinds — return ERROR_TYPE (no cascading)
@@ -911,6 +924,98 @@ class Typer {
 			}
 		}
 		return [];
+	}
+
+	// -------------------------------------------------------------------
+	// Field access
+	// -------------------------------------------------------------------
+
+	private checkFieldAccess(
+		node: Extract<AstNode, { kind: "FieldAccess" }>,
+		env: Map<string, Type>,
+	): Type {
+		const objectType = this.checkExpr(node.object, env);
+		if (isError(objectType)) return ERROR_TYPE;
+
+		if (objectType.kind === "record") {
+			const fieldType = objectType.fields.get(node.field);
+			if (fieldType !== undefined) return fieldType;
+
+			this.diagnostics.push({
+				code: "E0401",
+				severity: "error",
+				message: `no field \`${node.field}\` on type \`${printType(objectType)}\``,
+				span: node.span,
+				docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+			});
+			return ERROR_TYPE;
+		}
+
+		this.diagnostics.push({
+			code: "E0401",
+			severity: "error",
+			message: `type \`${printType(objectType)}\` has no fields`,
+			span: node.span,
+			docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+		});
+		return ERROR_TYPE;
+	}
+
+	// -------------------------------------------------------------------
+	// Record expressions
+	// -------------------------------------------------------------------
+
+	private checkRecordExpr(
+		node: Extract<AstNode, { kind: "RecordExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const fields = new Map<string, Type>();
+		for (const fieldId of node.fields) {
+			const fieldNode = this.arena.get(fieldId);
+			if (fieldNode.kind === "RecordInit") {
+				const valueType = fieldNode.value !== null
+					? this.checkExpr(fieldNode.value, env)
+					: env.get(fieldNode.name) ?? ERROR_TYPE;
+				fields.set(fieldNode.name, valueType);
+			}
+		}
+		return { kind: "record", fields };
+	}
+
+	// -------------------------------------------------------------------
+	// Tuple expressions
+	// -------------------------------------------------------------------
+
+	private checkTupleExpr(
+		node: Extract<AstNode, { kind: "TupleExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const elements = node.elements.map((elemId) => this.checkExpr(elemId, env));
+		return { kind: "tuple", elements };
+	}
+
+	// -------------------------------------------------------------------
+	// List expressions
+	// -------------------------------------------------------------------
+
+	private checkListExpr(
+		node: Extract<AstNode, { kind: "ListExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		if (node.elements.length === 0) {
+			// Empty list — element type unknown, use ERROR_TYPE (compatible with anything)
+			return { kind: "nominal", name: "List", declNode: BUILTIN_DECL_NODE, typeArgs: [ERROR_TYPE] };
+		}
+
+		const firstType = this.checkExpr(node.elements[0], env);
+		for (let i = 1; i < node.elements.length; i++) {
+			const elemType = this.checkExpr(node.elements[i], env);
+			if (!isError(firstType) && !isError(elemType) && !typesEqual(firstType, elemType)) {
+				this.emitTypeMismatch(firstType, elemType, this.arena.get(node.elements[i]).span);
+			}
+		}
+
+		return { kind: "nominal", name: "List", declNode: BUILTIN_DECL_NODE, typeArgs: [firstType] };
 	}
 
 	// -------------------------------------------------------------------

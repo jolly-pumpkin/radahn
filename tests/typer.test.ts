@@ -319,6 +319,51 @@ fn b() -> Bool {
 		});
 	});
 
+	describe("field access", () => {
+		test("record field access", () => {
+			const src = "module t\nend-module\nfn f(p: { x: Int, y: Int }) -> Int { p.x }";
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("nonexistent field is E0401", () => {
+			const src = "module t\nend-module\nfn f(p: { x: Int }) -> Int { p.z }";
+			const errs = errors(src, "E0401");
+			expect(errs.length).toBe(1);
+			expect(errs[0].message).toContain("z");
+		});
+	});
+
+	describe("tuple expressions", () => {
+		test("tuple expression", () => {
+			const src = 'module t\nend-module\nfn f() -> (Int, String) { (1, "hi") }';
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
+
+	describe("list expressions", () => {
+		test("homogeneous list", () => {
+			const src = "module t\nend-module\nfn f() -> List[Int] { [1, 2, 3] }";
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("empty list", () => {
+			const src = "module t\nend-module\nfn f() -> List[Int] { [] }";
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
+
+	describe("record expressions", () => {
+		test("anonymous record expression", () => {
+			const src = "module t\nend-module\nfn f() -> { x: Int, y: String } { { x: 1, y: \"hi\" } }";
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
+
 	describe("typeMap population", () => {
 		test("literals have types in typeMap", () => {
 			const result = check(`module app
