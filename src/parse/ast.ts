@@ -16,9 +16,19 @@ export type NodeKind = AstNode["kind"];
 // ---------------------------------------------------------------------------
 
 export type BinaryOp =
-	| "+" | "-" | "*" | "/" | "%"
-	| "==" | "!=" | "<" | "<=" | ">" | ">="
-	| "&&" | "||"
+	| "+"
+	| "-"
+	| "*"
+	| "/"
+	| "%"
+	| "=="
+	| "!="
+	| "<"
+	| "<="
+	| ">"
+	| ">="
+	| "&&"
+	| "||"
 	| "++";
 
 export type UnaryOp = "-" | "!";
@@ -142,6 +152,7 @@ export type EffectRowNode = {
 	kind: "EffectRow";
 	span: Span;
 	effects: NodeId[];
+	tail: NodeId | null; // Ident node for row variable, e.g. `e` in `! { log | e }`
 };
 
 export type EffectNameNode = {

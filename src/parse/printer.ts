@@ -2,7 +2,7 @@
 // Used for round-trip testing only. Not a formatter.
 
 import type { Arena, NodeId } from "../util/arena";
-import { exhaustive, type AstNode, type BinaryOp, type UnaryOp } from "./ast";
+import { type AstNode, type BinaryOp, type UnaryOp, exhaustive } from "./ast";
 
 export function print(arena: Arena<AstNode>, root: NodeId): string {
 	const printer = new Printer(arena);
@@ -20,73 +20,137 @@ class Printer {
 	printNode(id: NodeId): string {
 		const node = this.arena.get(id);
 		switch (node.kind) {
-			case "File": return this.printFile(node);
-			case "ModuleHeader": return this.printModuleHeader(node);
-			case "ModulePath": return this.printModulePath(node);
-			case "ModuleField": return this.printModuleField(node);
-			case "Import": return this.printImport(node);
-			case "FnDecl": return this.printFnDecl(node);
-			case "TypeDecl": return this.printTypeDecl(node);
-			case "SumType": return this.printSumType(node);
-			case "Variant": return this.printVariant(node);
-			case "ExternBlock": return this.printExternBlock(node);
-			case "ExternFnDecl": return this.printExternFnDecl(node);
-			case "ExternTypeDecl": return this.printExternTypeDecl(node);
-			case "Param": return this.printParam(node);
-			case "TypeParams": return `[${node.names.join(", ")}]`;
-			case "EffectRow": return this.printEffectRow(node);
-			case "EffectName": return node.segments.join(".");
-			case "ContractPre": return `${this.ind()}@pre ${this.printNode(node.expr)}`;
-			case "ContractPost": return `${this.ind()}@post ${this.printNode(node.expr)}`;
-			case "ContractCost": return `${this.ind()}@cost ${node.fields.map(f => this.printNode(f)).join(", ")}`;
-			case "CostField": return `${node.name}: ${this.printNode(node.value)}`;
-			case "CostValue": return `${node.prefix ? node.prefix + " " : ""}${node.number}${node.unit ? " " + node.unit : ""}`;
-			case "NominalType": return this.printNominalType(node);
-			case "RecordType": return this.printRecordType(node);
-			case "TupleType": return `(${node.elements.map(e => this.printNode(e)).join(", ")})`;
-			case "FnType": return this.printFnType(node);
-			case "VoidType": return "()";
-			case "RefinedType": return `${this.printNode(node.base)} where ${this.printNode(node.predicate)}`;
-			case "Field": return `${node.name}: ${this.printNode(node.type)}`;
-			case "Block": return this.printBlock(node);
-			case "LetStmt": return this.printLetStmt(node);
-			case "ReturnStmt": return `${this.ind()}return${node.value ? " " + this.printNode(node.value) : ""}`;
-			case "ExprStmt": return `${this.ind()}${this.printNode(node.expr)}`;
-			case "WildcardPat": return "_";
-			case "LiteralPat": return node.value;
-			case "BindingPat": return node.name;
-			case "CtorPat": return node.args.length ? `${node.name}(${node.args.map(a => this.printNode(a)).join(", ")})` : node.name;
-			case "RecordPat": return `{ ${node.fields.map(f => this.printNode(f)).join(", ")} }`;
-			case "RecordPatField": return node.pattern ? `${node.name}: ${this.printNode(node.pattern)}` : node.name;
-			case "TuplePat": return `(${node.elements.map(e => this.printNode(e)).join(", ")})`;
-			case "IntLit": return node.value;
-			case "FloatLit": return node.value;
-			case "StringLit": return node.value;
-			case "BoolLit": return node.value ? "true" : "false";
-			case "VoidLit": return "()";
-			case "Ident": return node.name;
-			case "BinaryExpr": return this.printBinaryExpr(node);
-			case "UnaryExpr": return this.printUnaryExpr(node);
-			case "CallExpr": return `${this.printNode(node.callee)}(${node.args.map(a => this.printNode(a)).join(", ")})`;
-			case "FieldAccess": return `${this.printNode(node.object)}.${node.field}`;
-			case "IndexExpr": return `${this.printNode(node.object)}[${this.printNode(node.index)}]`;
-			case "TryExpr": return `${this.printNode(node.expr)}?`;
-			case "TurbofishExpr": return `${this.printNode(node.expr)}::<${this.printNode(node.typeArg)}>`;
-			case "IfExpr": return this.printIfExpr(node);
-			case "MatchExpr": return this.printMatchExpr(node);
-			case "MatchArm": return this.printMatchArm(node);
-			case "TupleExpr": return `(${node.elements.map(e => this.printNode(e)).join(", ")})`;
-			case "RecordExpr": return this.printRecordExpr(node);
-			case "RecordInit": return node.value ? `${node.name}: ${this.printNode(node.value)}` : node.name;
-			case "ListExpr": return `[${node.elements.map(e => this.printNode(e)).join(", ")}]`;
-			case "NamedArg": return `${node.name} = ${this.printNode(node.value)}`;
+			case "File":
+				return this.printFile(node);
+			case "ModuleHeader":
+				return this.printModuleHeader(node);
+			case "ModulePath":
+				return this.printModulePath(node);
+			case "ModuleField":
+				return this.printModuleField(node);
+			case "Import":
+				return this.printImport(node);
+			case "FnDecl":
+				return this.printFnDecl(node);
+			case "TypeDecl":
+				return this.printTypeDecl(node);
+			case "SumType":
+				return this.printSumType(node);
+			case "Variant":
+				return this.printVariant(node);
+			case "ExternBlock":
+				return this.printExternBlock(node);
+			case "ExternFnDecl":
+				return this.printExternFnDecl(node);
+			case "ExternTypeDecl":
+				return this.printExternTypeDecl(node);
+			case "Param":
+				return this.printParam(node);
+			case "TypeParams":
+				return `[${node.names.join(", ")}]`;
+			case "EffectRow":
+				return this.printEffectRow(node);
+			case "EffectName":
+				return node.segments.join(".");
+			case "ContractPre":
+				return `${this.ind()}@pre ${this.printNode(node.expr)}`;
+			case "ContractPost":
+				return `${this.ind()}@post ${this.printNode(node.expr)}`;
+			case "ContractCost":
+				return `${this.ind()}@cost ${node.fields.map((f) => this.printNode(f)).join(", ")}`;
+			case "CostField":
+				return `${node.name}: ${this.printNode(node.value)}`;
+			case "CostValue":
+				return `${node.prefix ? node.prefix + " " : ""}${node.number}${node.unit ? " " + node.unit : ""}`;
+			case "NominalType":
+				return this.printNominalType(node);
+			case "RecordType":
+				return this.printRecordType(node);
+			case "TupleType":
+				return `(${node.elements.map((e) => this.printNode(e)).join(", ")})`;
+			case "FnType":
+				return this.printFnType(node);
+			case "VoidType":
+				return "()";
+			case "RefinedType":
+				return `${this.printNode(node.base)} where ${this.printNode(node.predicate)}`;
+			case "Field":
+				return `${node.name}: ${this.printNode(node.type)}`;
+			case "Block":
+				return this.printBlock(node);
+			case "LetStmt":
+				return this.printLetStmt(node);
+			case "ReturnStmt":
+				return `${this.ind()}return${node.value ? " " + this.printNode(node.value) : ""}`;
+			case "ExprStmt":
+				return `${this.ind()}${this.printNode(node.expr)}`;
+			case "WildcardPat":
+				return "_";
+			case "LiteralPat":
+				return node.value;
+			case "BindingPat":
+				return node.name;
+			case "CtorPat":
+				return node.args.length
+					? `${node.name}(${node.args.map((a) => this.printNode(a)).join(", ")})`
+					: node.name;
+			case "RecordPat":
+				return `{ ${node.fields.map((f) => this.printNode(f)).join(", ")} }`;
+			case "RecordPatField":
+				return node.pattern ? `${node.name}: ${this.printNode(node.pattern)}` : node.name;
+			case "TuplePat":
+				return `(${node.elements.map((e) => this.printNode(e)).join(", ")})`;
+			case "IntLit":
+				return node.value;
+			case "FloatLit":
+				return node.value;
+			case "StringLit":
+				return node.value;
+			case "BoolLit":
+				return node.value ? "true" : "false";
+			case "VoidLit":
+				return "()";
+			case "Ident":
+				return node.name;
+			case "BinaryExpr":
+				return this.printBinaryExpr(node);
+			case "UnaryExpr":
+				return this.printUnaryExpr(node);
+			case "CallExpr":
+				return `${this.printNode(node.callee)}(${node.args.map((a) => this.printNode(a)).join(", ")})`;
+			case "FieldAccess":
+				return `${this.printNode(node.object)}.${node.field}`;
+			case "IndexExpr":
+				return `${this.printNode(node.object)}[${this.printNode(node.index)}]`;
+			case "TryExpr":
+				return `${this.printNode(node.expr)}?`;
+			case "TurbofishExpr":
+				return `${this.printNode(node.expr)}::<${this.printNode(node.typeArg)}>`;
+			case "IfExpr":
+				return this.printIfExpr(node);
+			case "MatchExpr":
+				return this.printMatchExpr(node);
+			case "MatchArm":
+				return this.printMatchArm(node);
+			case "TupleExpr":
+				return `(${node.elements.map((e) => this.printNode(e)).join(", ")})`;
+			case "RecordExpr":
+				return this.printRecordExpr(node);
+			case "RecordInit":
+				return node.value ? `${node.name}: ${this.printNode(node.value)}` : node.name;
+			case "ListExpr":
+				return `[${node.elements.map((e) => this.printNode(e)).join(", ")}]`;
+			case "NamedArg":
+				return `${node.name} = ${this.printNode(node.value)}`;
 			case "BlockExpr": {
 				const blockNode = this.arena.get(node.block);
 				if (blockNode.kind === "Block") return this.printBlock(blockNode);
 				return "{}";
 			}
-			case "RangeExpr": return `${this.printNode(node.start)}..${this.printNode(node.end)}`;
-			default: return exhaustive(node);
+			case "RangeExpr":
+				return `${this.printNode(node.start)}..${this.printNode(node.end)}`;
+			default:
+				return exhaustive(node);
 		}
 	}
 
@@ -136,7 +200,7 @@ class Printer {
 		out += `fn ${node.name}`;
 		if (node.typeParams) out += this.printNode(node.typeParams);
 		out += "(";
-		out += node.params.map(p => this.printNode(p)).join(",\n" + this.ind() + "  ");
+		out += node.params.map((p) => this.printNode(p)).join(",\n" + this.ind() + "  ");
 		out += ")";
 		if (node.returnType) out += ` -> ${this.printNode(node.returnType)}`;
 		if (node.effectRow) out += ` ${this.printNode(node.effectRow)}`;
@@ -169,15 +233,15 @@ class Printer {
 	}
 
 	private printSumType(node: Extract<AstNode, { kind: "SumType" }>): string {
-		return node.variants.map(v => `${this.ind()}  | ${this.printNode(v)}`).join("\n");
+		return node.variants.map((v) => `${this.ind()}  | ${this.printNode(v)}`).join("\n");
 	}
 
 	private printVariant(node: Extract<AstNode, { kind: "Variant" }>): string {
 		if (node.payloadKind === "none") return node.name;
 		if (node.payloadKind === "positional") {
-			return `${node.name}(${node.payload.map(p => this.printNode(p)).join(", ")})`;
+			return `${node.name}(${node.payload.map((p) => this.printNode(p)).join(", ")})`;
 		}
-		return `${node.name}(${node.payload.map(p => this.printNode(p)).join(", ")})`;
+		return `${node.name}(${node.payload.map((p) => this.printNode(p)).join(", ")})`;
 	}
 
 	private printExternBlock(node: Extract<AstNode, { kind: "ExternBlock" }>): string {
@@ -192,7 +256,7 @@ class Printer {
 	}
 
 	private printExternFnDecl(node: Extract<AstNode, { kind: "ExternFnDecl" }>): string {
-		let out = `fn ${node.name}(${node.params.map(p => this.printNode(p)).join(", ")})`;
+		let out = `fn ${node.name}(${node.params.map((p) => this.printNode(p)).join(", ")})`;
 		if (node.returnType) out += ` -> ${this.printNode(node.returnType)}`;
 		if (node.effectRow) out += ` ${this.printNode(node.effectRow)}`;
 		return out;
@@ -209,24 +273,32 @@ class Printer {
 	}
 
 	private printEffectRow(node: Extract<AstNode, { kind: "EffectRow" }>): string {
-		return `! { ${node.effects.map(e => this.printNode(e)).join(", ")} }`;
+		const effects = node.effects.map((e) => this.printNode(e)).join(", ");
+		if (node.tail !== null) {
+			const tailName = this.printNode(node.tail);
+			if (node.effects.length === 0) {
+				return `! { | ${tailName} }`;
+			}
+			return `! { ${effects} | ${tailName} }`;
+		}
+		return `! { ${effects} }`;
 	}
 
 	private printNominalType(node: Extract<AstNode, { kind: "NominalType" }>): string {
 		let out = node.segments.join(".");
 		if (node.typeArgs.length) {
-			out += `[${node.typeArgs.map(a => this.printNode(a)).join(", ")}]`;
+			out += `[${node.typeArgs.map((a) => this.printNode(a)).join(", ")}]`;
 		}
 		return out;
 	}
 
 	private printRecordType(node: Extract<AstNode, { kind: "RecordType" }>): string {
 		if (node.fields.length === 0) return "{}";
-		return `{ ${node.fields.map(f => this.printNode(f)).join(", ")} }`;
+		return `{ ${node.fields.map((f) => this.printNode(f)).join(", ")} }`;
 	}
 
 	private printFnType(node: Extract<AstNode, { kind: "FnType" }>): string {
-		let out = `fn(${node.params.map(p => this.printNode(p)).join(", ")}) -> ${this.printNode(node.returnType)}`;
+		let out = `fn(${node.params.map((p) => this.printNode(p)).join(", ")}) -> ${this.printNode(node.returnType)}`;
 		if (node.effectRow) out += ` ${this.printNode(node.effectRow)}`;
 		return out;
 	}
@@ -289,7 +361,7 @@ class Printer {
 	private printRecordExpr(node: Extract<AstNode, { kind: "RecordExpr" }>): string {
 		const name = node.name ? node.name + " " : "";
 		if (node.fields.length === 0) return `${name}{}`;
-		return `${name}{ ${node.fields.map(f => this.printNode(f)).join(", ")} }`;
+		return `${name}{ ${node.fields.map((f) => this.printNode(f)).join(", ")} }`;
 	}
 
 	// Conservative parenthesization for round-trip safety
@@ -310,11 +382,25 @@ class Printer {
 
 	private opPrecedence(op: BinaryOp): number {
 		switch (op) {
-			case "||": return 2;
-			case "&&": return 4;
-			case "==": case "!=": case "<": case "<=": case ">": case ">=": return 6;
-			case "+": case "-": case "++": return 10;
-			case "*": case "/": case "%": return 12;
+			case "||":
+				return 2;
+			case "&&":
+				return 4;
+			case "==":
+			case "!=":
+			case "<":
+			case "<=":
+			case ">":
+			case ">=":
+				return 6;
+			case "+":
+			case "-":
+			case "++":
+				return 10;
+			case "*":
+			case "/":
+			case "%":
+				return 12;
 		}
 	}
 

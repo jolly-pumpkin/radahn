@@ -2,11 +2,11 @@
 // Recursive descent with Pratt parsing for expressions.
 // Panic-mode error recovery.
 
-import type { Diagnostic, Span } from "../diag/types";
 import type { DiagnosticCode } from "../diag/codes";
 import { DIAGNOSTIC_REGISTRY } from "../diag/codes";
-import { Arena, type NodeId } from "../util/arena";
+import type { Diagnostic, Span } from "../diag/types";
 import type { Token, TokenKind } from "../lex/lexer";
+import { Arena, type NodeId } from "../util/arena";
 import type { AstNode, BinaryOp, UnaryOp } from "./ast";
 
 // ---------------------------------------------------------------------------
@@ -32,23 +32,41 @@ type BpPair = [left: number, right: number];
 
 function infixBp(kind: TokenKind): BpPair | null {
 	switch (kind) {
-		case "PipePipe": return [2, 3];
-		case "AmpAmp": return [4, 5];
+		case "PipePipe":
+			return [2, 3];
+		case "AmpAmp":
+			return [4, 5];
 		// Non-associative: equal left and right
-		case "EqEq": case "BangEq": case "Lt": case "LtEq": case "Gt": case "GtEq":
+		case "EqEq":
+		case "BangEq":
+		case "Lt":
+		case "LtEq":
+		case "Gt":
+		case "GtEq":
 			return [6, 6];
-		case "DotDot": return [8, 8];
+		case "DotDot":
+			return [8, 8];
 		// Left-associative
-		case "Plus": case "Minus": case "PlusPlus": return [10, 11];
-		case "Star": case "Slash": case "Percent": return [12, 13];
-		default: return null;
+		case "Plus":
+		case "Minus":
+		case "PlusPlus":
+			return [10, 11];
+		case "Star":
+		case "Slash":
+		case "Percent":
+			return [12, 13];
+		default:
+			return null;
 	}
 }
 
 function prefixBp(_kind: TokenKind): number | null {
 	switch (_kind) {
-		case "Minus": case "Bang": return 14;
-		default: return null;
+		case "Minus":
+		case "Bang":
+			return 14;
+		default:
+			return null;
 	}
 }
 
@@ -56,37 +74,61 @@ const POSTFIX_BP = 16;
 
 function tokenToBinaryOp(kind: TokenKind): BinaryOp | ".." | null {
 	switch (kind) {
-		case "Plus": return "+";
-		case "Minus": return "-";
-		case "Star": return "*";
-		case "Slash": return "/";
-		case "Percent": return "%";
-		case "EqEq": return "==";
-		case "BangEq": return "!=";
-		case "Lt": return "<";
-		case "LtEq": return "<=";
-		case "Gt": return ">";
-		case "GtEq": return ">=";
-		case "AmpAmp": return "&&";
-		case "PipePipe": return "||";
-		case "PlusPlus": return "++";
-		case "DotDot": return "..";
-		default: return null;
+		case "Plus":
+			return "+";
+		case "Minus":
+			return "-";
+		case "Star":
+			return "*";
+		case "Slash":
+			return "/";
+		case "Percent":
+			return "%";
+		case "EqEq":
+			return "==";
+		case "BangEq":
+			return "!=";
+		case "Lt":
+			return "<";
+		case "LtEq":
+			return "<=";
+		case "Gt":
+			return ">";
+		case "GtEq":
+			return ">=";
+		case "AmpAmp":
+			return "&&";
+		case "PipePipe":
+			return "||";
+		case "PlusPlus":
+			return "++";
+		case "DotDot":
+			return "..";
+		default:
+			return null;
 	}
 }
 
 function tokenToUnaryOp(kind: TokenKind): UnaryOp | null {
 	switch (kind) {
-		case "Minus": return "-";
-		case "Bang": return "!";
-		default: return null;
+		case "Minus":
+			return "-";
+		case "Bang":
+			return "!";
+		default:
+			return null;
 	}
 }
 
 // Non-associative precedence levels (reject chaining)
 function isNonAssociative(kind: TokenKind): boolean {
 	switch (kind) {
-		case "EqEq": case "BangEq": case "Lt": case "LtEq": case "Gt": case "GtEq":
+		case "EqEq":
+		case "BangEq":
+		case "Lt":
+		case "LtEq":
+		case "Gt":
+		case "GtEq":
 		case "DotDot":
 			return true;
 		default:
@@ -95,10 +137,33 @@ function isNonAssociative(kind: TokenKind): boolean {
 }
 
 const KEYWORD_KINDS: Set<string> = new Set([
-	"fn", "let", "if", "else", "match", "module", "end-module",
-	"import", "export", "extern", "pub", "effect", "cap",
-	"type", "trait", "impl", "where", "pre", "post", "cost",
-	"spec", "test", "partial", "linear", "return", "for", "in",
+	"fn",
+	"let",
+	"if",
+	"else",
+	"match",
+	"module",
+	"end-module",
+	"import",
+	"export",
+	"extern",
+	"pub",
+	"effect",
+	"cap",
+	"type",
+	"trait",
+	"impl",
+	"where",
+	"pre",
+	"post",
+	"cost",
+	"spec",
+	"test",
+	"partial",
+	"linear",
+	"return",
+	"for",
+	"in",
 ]);
 
 function isKeywordKind(kind: TokenKind): boolean {
@@ -205,9 +270,18 @@ class Parser {
 		const name = nameToken.value;
 
 		if (!name || !["version", "exports", "effects", "caps", "since", "summary"].includes(name)) {
-			this.error("E0101", `expected module field (version, exports, effects, caps, since, summary), got \`${name || nameToken.kind}\``, nameToken.span);
+			this.error(
+				"E0101",
+				`expected module field (version, exports, effects, caps, since, summary), got \`${name || nameToken.kind}\``,
+				nameToken.span,
+			);
 			this.synchronize();
-			return this.arena.alloc({ kind: "ModuleField", span: this.spanFrom(start), name: "version", value: "" });
+			return this.arena.alloc({
+				kind: "ModuleField",
+				span: this.spanFrom(start),
+				name: "version",
+				value: "",
+			});
 		}
 
 		this.expect("Colon");
@@ -276,14 +350,22 @@ class Parser {
 		// Top-level let binding
 		if (this.check("let")) {
 			if (visibility) {
-				this.error("E0101", "`let` at top level cannot have visibility modifier", this.currentSpan());
+				this.error(
+					"E0101",
+					"`let` at top level cannot have visibility modifier",
+					this.currentSpan(),
+				);
 			}
 			return this.parseLetStmt();
 		}
 
 		// Top-level expression statement (e.g., function calls)
 		if (visibility) {
-			this.error("E0101", `expected declaration (fn, type, import, extern), got \`${tok.kind}\``, tok.span);
+			this.error(
+				"E0101",
+				`expected declaration (fn, type, import, extern), got \`${tok.kind}\``,
+				tok.span,
+			);
 			this.synchronize();
 			return null;
 		}
@@ -299,7 +381,11 @@ class Parser {
 				expr,
 			});
 		} catch {
-			this.error("E0101", `expected declaration (fn, type, import, extern), got \`${tok.kind}\``, tok.span);
+			this.error(
+				"E0101",
+				`expected declaration (fn, type, import, extern), got \`${tok.kind}\``,
+				tok.span,
+			);
 			this.synchronize();
 			return null;
 		}
@@ -399,12 +485,28 @@ class Parser {
 		this.expect("Bang");
 		this.expect("LBrace");
 		const effects: NodeId[] = [];
-		while (!this.atEnd() && !this.check("RBrace")) {
-			effects.push(this.parseEffectName());
-			if (!this.eat("Comma")) break;
+		let tail: NodeId | null = null;
+
+		if (this.check("Pipe")) {
+			// Fully open: ! { | e }
+			this.advance();
+			const tailStart = this.currentSpan();
+			const name = this.expectIdent();
+			tail = this.arena.alloc({ kind: "Ident", span: this.spanFrom(tailStart), name });
+		} else {
+			while (!this.atEnd() && !this.check("RBrace") && !this.check("Pipe")) {
+				effects.push(this.parseEffectName());
+				if (!this.eat("Comma")) break;
+			}
+			if (this.eat("Pipe")) {
+				const tailStart = this.currentSpan();
+				const name = this.expectIdent();
+				tail = this.arena.alloc({ kind: "Ident", span: this.spanFrom(tailStart), name });
+			}
 		}
+
 		this.expect("RBrace");
-		return this.arena.alloc({ kind: "EffectRow", span: this.spanFrom(start), effects });
+		return this.arena.alloc({ kind: "EffectRow", span: this.spanFrom(start), effects, tail });
 	}
 
 	private parseEffectName(): NodeId {
@@ -446,7 +548,11 @@ class Parser {
 
 		this.error("E0501", "expected `pre`, `post`, or `cost` after `@`", this.currentSpan());
 		this.synchronize();
-		return this.arena.alloc({ kind: "ContractPre", span: this.spanFrom(start), expr: this.allocDummyExpr() });
+		return this.arena.alloc({
+			kind: "ContractPre",
+			span: this.spanFrom(start),
+			expr: this.allocDummyExpr(),
+		});
 	}
 
 	private parseCostField(): NodeId {
@@ -481,7 +587,13 @@ class Parser {
 			unit = this.advance().value || null;
 		}
 
-		return this.arena.alloc({ kind: "CostValue", span: this.spanFrom(start), prefix, number: numValue, unit });
+		return this.arena.alloc({
+			kind: "CostValue",
+			span: this.spanFrom(start),
+			prefix,
+			number: numValue,
+			unit,
+		});
 	}
 
 	// --- Type declarations ---
@@ -502,7 +614,14 @@ class Parser {
 		}
 
 		this.expectNewline();
-		return this.arena.alloc({ kind: "TypeDecl", span: this.spanFrom(start), visibility, name, typeParams, value });
+		return this.arena.alloc({
+			kind: "TypeDecl",
+			span: this.spanFrom(start),
+			visibility,
+			name,
+			typeParams,
+			value,
+		});
 	}
 
 	private parseSumType(): NodeId {
@@ -542,7 +661,13 @@ class Parser {
 			this.expect("RParen");
 		}
 
-		return this.arena.alloc({ kind: "Variant", span: this.spanFrom(start), name, payloadKind, payload });
+		return this.arena.alloc({
+			kind: "Variant",
+			span: this.spanFrom(start),
+			name,
+			payloadKind,
+			payload,
+		});
 	}
 
 	// --- Extern blocks ---
@@ -585,7 +710,14 @@ class Parser {
 			const returnType = this.eat("Arrow") ? this.parseType() : null;
 			const effectRow = this.check("Bang") ? this.parseEffectRow() : null;
 			this.expectNewline();
-			return this.arena.alloc({ kind: "ExternFnDecl", span: this.spanFrom(start), name, params, returnType, effectRow });
+			return this.arena.alloc({
+				kind: "ExternFnDecl",
+				span: this.spanFrom(start),
+				name,
+				params,
+				returnType,
+				effectRow,
+			});
 		}
 
 		if (this.check("type")) {
@@ -593,12 +725,22 @@ class Parser {
 			const name = this.expectIdent();
 			const typeParams = this.check("LBracket") ? this.parseTypeParams() : null;
 			this.expectNewline();
-			return this.arena.alloc({ kind: "ExternTypeDecl", span: this.spanFrom(start), name, typeParams });
+			return this.arena.alloc({
+				kind: "ExternTypeDecl",
+				span: this.spanFrom(start),
+				name,
+				typeParams,
+			});
 		}
 
 		this.error("E0101", "expected `fn` or `type` in extern block", this.currentSpan());
 		this.synchronize();
-		return this.arena.alloc({ kind: "ExternTypeDecl", span: this.spanFrom(start), name: "<error>", typeParams: null });
+		return this.arena.alloc({
+			kind: "ExternTypeDecl",
+			span: this.spanFrom(start),
+			name: "<error>",
+			typeParams: null,
+		});
 	}
 
 	// --- Types ---
@@ -680,7 +822,12 @@ class Parser {
 			this.bracketDepth--;
 			this.expect("RBracket");
 		}
-		return this.arena.alloc({ kind: "NominalType", span: this.spanFrom(start), segments, typeArgs });
+		return this.arena.alloc({
+			kind: "NominalType",
+			span: this.spanFrom(start),
+			segments,
+			typeArgs,
+		});
 	}
 
 	private parseRecordType(): NodeId {
@@ -721,7 +868,13 @@ class Parser {
 		this.expect("Arrow");
 		const returnType = this.parseType();
 		const effectRow = this.check("Bang") ? this.parseEffectRow() : null;
-		return this.arena.alloc({ kind: "FnType", span: this.spanFrom(start), params, returnType, effectRow });
+		return this.arena.alloc({
+			kind: "FnType",
+			span: this.spanFrom(start),
+			params,
+			returnType,
+			effectRow,
+		});
 	}
 
 	// --- Blocks and statements ---
@@ -801,7 +954,9 @@ class Parser {
 				if (this.eat("Colon")) {
 					pattern = this.parsePattern();
 				}
-				fields.push(this.arena.alloc({ kind: "RecordPatField", span: this.spanFrom(fStart), name, pattern }));
+				fields.push(
+					this.arena.alloc({ kind: "RecordPatField", span: this.spanFrom(fStart), name, pattern }),
+				);
 				if (!this.eat("Comma")) break;
 			}
 			this.expect("RBrace");
@@ -833,19 +988,39 @@ class Parser {
 		// Literal patterns
 		if (this.check("IntLit")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "LiteralPat", span: this.spanFrom(start), value: tok.value || "0", litKind: "int" });
+			return this.arena.alloc({
+				kind: "LiteralPat",
+				span: this.spanFrom(start),
+				value: tok.value || "0",
+				litKind: "int",
+			});
 		}
 		if (this.check("FloatLit")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "LiteralPat", span: this.spanFrom(start), value: tok.value || "0.0", litKind: "float" });
+			return this.arena.alloc({
+				kind: "LiteralPat",
+				span: this.spanFrom(start),
+				value: tok.value || "0.0",
+				litKind: "float",
+			});
 		}
 		if (this.check("StringLit")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "LiteralPat", span: this.spanFrom(start), value: tok.value || '""', litKind: "string" });
+			return this.arena.alloc({
+				kind: "LiteralPat",
+				span: this.spanFrom(start),
+				value: tok.value || '""',
+				litKind: "string",
+			});
 		}
 		if (this.check("BoolTrue") || this.check("BoolFalse")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "LiteralPat", span: this.spanFrom(start), value: tok.kind === "BoolTrue" ? "true" : "false", litKind: "bool" });
+			return this.arena.alloc({
+				kind: "LiteralPat",
+				span: this.spanFrom(start),
+				value: tok.kind === "BoolTrue" ? "true" : "false",
+				litKind: "bool",
+			});
 		}
 
 		// Constructor or binding pattern
@@ -925,14 +1100,29 @@ class Parser {
 			if (isNonAssociative(opTok.kind)) {
 				const nextBp = infixBp(this.peek().kind);
 				if (nextBp !== null && nextBp[0] === leftBp) {
-					this.error("E0101", `chained \`${this.peek().kind}\` is not allowed; use \`&&\` to combine comparisons`, this.peek().span);
+					this.error(
+						"E0101",
+						`chained \`${this.peek().kind}\` is not allowed; use \`&&\` to combine comparisons`,
+						this.peek().span,
+					);
 				}
 			}
 
 			if (op === "..") {
-				lhs = this.arena.alloc({ kind: "RangeExpr", span: this.spanFrom(start), start: lhs, end: rhs });
+				lhs = this.arena.alloc({
+					kind: "RangeExpr",
+					span: this.spanFrom(start),
+					start: lhs,
+					end: rhs,
+				});
 			} else {
-				lhs = this.arena.alloc({ kind: "BinaryExpr", span: this.spanFrom(start), op, left: lhs, right: rhs });
+				lhs = this.arena.alloc({
+					kind: "BinaryExpr",
+					span: this.spanFrom(start),
+					op,
+					left: lhs,
+					right: rhs,
+				});
 			}
 		}
 
@@ -952,7 +1142,12 @@ class Parser {
 		if (this.check("Dot")) {
 			this.advance();
 			const field = this.expectIdentOrKeyword();
-			return this.arena.alloc({ kind: "FieldAccess", span: this.spanFrom(start), object: lhs, field });
+			return this.arena.alloc({
+				kind: "FieldAccess",
+				span: this.spanFrom(start),
+				object: lhs,
+				field,
+			});
 		}
 
 		// Index: [expr]
@@ -962,7 +1157,12 @@ class Parser {
 			const index = this.parseExpr();
 			this.bracketDepth--;
 			this.expect("RBracket");
-			return this.arena.alloc({ kind: "IndexExpr", span: this.spanFrom(start), object: lhs, index });
+			return this.arena.alloc({
+				kind: "IndexExpr",
+				span: this.spanFrom(start),
+				object: lhs,
+				index,
+			});
 		}
 
 		// Try: ?
@@ -977,7 +1177,12 @@ class Parser {
 			this.advance(); // <
 			const typeArg = this.parseType();
 			this.expect("Gt");
-			return this.arena.alloc({ kind: "TurbofishExpr", span: this.spanFrom(start), expr: lhs, typeArg });
+			return this.arena.alloc({
+				kind: "TurbofishExpr",
+				span: this.spanFrom(start),
+				expr: lhs,
+				typeArg,
+			});
 		}
 
 		// Named RecordExpr: IDENT { ... } (only if lhs is an Ident and not in scrutinee position)
@@ -986,7 +1191,10 @@ class Parser {
 			if (lhsNode.kind === "Ident") {
 				// Peek ahead: { IDENT : or { }
 				const next = this.peekNth(1);
-				if (next && (next.kind === "RBrace" || (next.kind === "Ident" && this.peekNth(2)?.kind === "Colon"))) {
+				if (
+					next &&
+					(next.kind === "RBrace" || (next.kind === "Ident" && this.peekNth(2)?.kind === "Colon"))
+				) {
 					return this.parseRecordExprBody(lhsNode.name, start);
 				}
 				// Also check for shorthand: { IDENT , or { IDENT }
@@ -1033,15 +1241,27 @@ class Parser {
 		// Literals
 		if (this.check("IntLit")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "IntLit", span: this.spanFrom(start), value: tok.value || "0" });
+			return this.arena.alloc({
+				kind: "IntLit",
+				span: this.spanFrom(start),
+				value: tok.value || "0",
+			});
 		}
 		if (this.check("FloatLit")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "FloatLit", span: this.spanFrom(start), value: tok.value || "0.0" });
+			return this.arena.alloc({
+				kind: "FloatLit",
+				span: this.spanFrom(start),
+				value: tok.value || "0.0",
+			});
 		}
 		if (this.check("StringLit")) {
 			const tok = this.advance();
-			return this.arena.alloc({ kind: "StringLit", span: this.spanFrom(start), value: tok.value || '""' });
+			return this.arena.alloc({
+				kind: "StringLit",
+				span: this.spanFrom(start),
+				value: tok.value || '""',
+			});
 		}
 		if (this.check("BoolTrue")) {
 			this.advance();
@@ -1129,7 +1349,14 @@ class Parser {
 			if (this.eat("Colon")) {
 				value = this.parseExpr();
 			}
-			fields.push(this.arena.alloc({ kind: "RecordInit", span: this.spanFrom(fStart), name: fieldName, value }));
+			fields.push(
+				this.arena.alloc({
+					kind: "RecordInit",
+					span: this.spanFrom(fStart),
+					name: fieldName,
+					value,
+				}),
+			);
 			if (!this.eat("Comma")) break;
 		}
 		this.expect("RBrace");
@@ -1209,7 +1436,12 @@ class Parser {
 
 	private peek(): Token {
 		this.skipInsignificantNewlines();
-		return this.tokens[this.pos] || { kind: "Eof" as const, span: { file: this.file, line: 0, col: 0, len: 0 } };
+		return (
+			this.tokens[this.pos] || {
+				kind: "Eof" as const,
+				span: { file: this.file, line: 0, col: 0, len: 0 },
+			}
+		);
 	}
 
 	private peekNth(n: number): Token | null {
@@ -1257,7 +1489,8 @@ class Parser {
 			// EOF counts as newline for statement terminators
 			return tok;
 		}
-		const code: DiagnosticCode = kind === "RParen" || kind === "RBracket" || kind === "RBrace" ? "E0102" : "E0101";
+		const code: DiagnosticCode =
+			kind === "RParen" || kind === "RBracket" || kind === "RBrace" ? "E0102" : "E0101";
 		this.error(code, `expected \`${kind}\`, got \`${tok.kind}\``, tok.span);
 		return tok;
 	}
@@ -1339,7 +1572,13 @@ class Parser {
 				this.pos++;
 				return;
 			}
-			if (tok.kind === "fn" || tok.kind === "type" || tok.kind === "extern" || tok.kind === "pub" || tok.kind === "import") {
+			if (
+				tok.kind === "fn" ||
+				tok.kind === "type" ||
+				tok.kind === "extern" ||
+				tok.kind === "pub" ||
+				tok.kind === "import"
+			) {
 				return; // Don't consume — let the caller handle
 			}
 			this.pos++;
@@ -1358,7 +1597,7 @@ class Parser {
 		const end = this.tokens[this.pos - 1]?.span || start;
 		// For single-line spans, compute precise length; for multi-line, use start token length
 		if (end.line === start.line) {
-			const len = (end.col + end.len) - start.col;
+			const len = end.col + end.len - start.col;
 			return { file: this.file, line: start.line, col: start.col, len: Math.max(len, 1) };
 		}
 		// Multi-line: len covers only the first line portion (col to EOL is unknowable without source)

@@ -2,12 +2,12 @@
 // Pass 1: collect top-level declarations into module scope.
 // Pass 2: resolve identifiers in bodies, emit diagnostics for unknowns/duplicates/unused.
 
-import type { NodeId, Arena } from "../util/arena";
-import type { AstNode } from "../parse/ast";
-import type { Diagnostic, Span } from "../diag/types";
-import { Scope, type Symbol, type SymbolKind } from "./scope";
-import { suggestNames } from "../util/levenshtein";
 import { DIAGNOSTIC_REGISTRY } from "../diag/codes";
+import type { Diagnostic, Span } from "../diag/types";
+import type { AstNode } from "../parse/ast";
+import type { Arena, NodeId } from "../util/arena";
+import { suggestNames } from "../util/levenshtein";
+import { Scope, type Symbol, type SymbolKind } from "./scope";
 
 export type ResolveResult = {
 	resolutions: Map<NodeId, NodeId>; // IdentNode → declaration NodeId
@@ -129,7 +129,13 @@ class Resolver {
 					if (externDecl.kind === "ExternFnDecl") {
 						this.defineInScope(scope, externDecl.name, "extern-fn", externDeclId, externDecl.span);
 					} else if (externDecl.kind === "ExternTypeDecl") {
-						this.defineInScope(scope, externDecl.name, "extern-type", externDeclId, externDecl.span);
+						this.defineInScope(
+							scope,
+							externDecl.name,
+							"extern-type",
+							externDeclId,
+							externDecl.span,
+						);
 					}
 				}
 				break;
@@ -194,10 +200,7 @@ class Resolver {
 		}
 	}
 
-	private resolveFnDecl(
-		node: Extract<AstNode, { kind: "FnDecl" }>,
-		parentScope: Scope,
-	): void {
+	private resolveFnDecl(node: Extract<AstNode, { kind: "FnDecl" }>, parentScope: Scope): void {
 		const fnScope = new Scope(parentScope);
 
 		// Register type params
@@ -238,6 +241,11 @@ class Resolver {
 			this.resolveType(node.returnType, fnScope);
 		}
 
+		// Resolve effect row tail
+		if (node.effectRow !== null) {
+			this.resolveEffectRow(node.effectRow, fnScope);
+		}
+
 		// Resolve contract expressions
 		for (const contractId of node.contracts) {
 			const contract = this.arena.get(contractId);
@@ -255,10 +263,7 @@ class Resolver {
 		}
 	}
 
-	private resolveTypeDecl(
-		node: Extract<AstNode, { kind: "TypeDecl" }>,
-		parentScope: Scope,
-	): void {
+	private resolveTypeDecl(node: Extract<AstNode, { kind: "TypeDecl" }>, parentScope: Scope): void {
 		const typeScope = new Scope(parentScope);
 
 		// Register type params
@@ -310,10 +315,7 @@ class Resolver {
 		}
 	}
 
-	private resolveBlock(
-		node: Extract<AstNode, { kind: "Block" }>,
-		parentScope: Scope,
-	): void {
+	private resolveBlock(node: Extract<AstNode, { kind: "Block" }>, parentScope: Scope): void {
 		const blockScope = new Scope(parentScope);
 		for (const stmtId of node.stmts) {
 			const stmt = this.arena.get(stmtId);
@@ -680,6 +682,9 @@ class Resolver {
 					this.resolveType(paramId, scope);
 				}
 				this.resolveType(node.returnType, scope);
+				if (node.effectRow !== null) {
+					this.resolveEffectRow(node.effectRow, scope);
+				}
 				break;
 			case "RefinedType":
 				this.resolveType(node.base, scope);
@@ -705,6 +710,21 @@ class Resolver {
 				break;
 			default:
 				break;
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Effect row resolution
+	// -----------------------------------------------------------------------
+
+	private resolveEffectRow(effectRowId: NodeId, scope: Scope): void {
+		const node = this.arena.get(effectRowId);
+		if (node.kind !== "EffectRow") return;
+		if (node.tail !== null) {
+			const tailNode = this.arena.get(node.tail);
+			if (tailNode.kind === "Ident") {
+				this.resolveIdent(tailNode, node.tail, scope);
+			}
 		}
 	}
 
