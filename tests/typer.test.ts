@@ -156,6 +156,47 @@ fn b() -> Bool {
 		});
 	});
 
+	describe("function calls", () => {
+		test("correct call to declared function", () => {
+			const result = check(
+				"module t\nend-module\nfn add(a: Int, b: Int) -> Int { a }\nfn main() -> Int { add(1, 2) }",
+			);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("wrong argument type is E0401", () => {
+			const errs = errors(
+				'module t\nend-module\nfn add(a: Int, b: Int) -> Int { a }\nfn main() -> Int { add(1, "hi") }',
+				"E0401",
+			);
+			expect(errs.length).toBe(1);
+			expect(errs[0].message).toContain("argument");
+		});
+
+		test("wrong argument count is E0401", () => {
+			const errs = errors(
+				"module t\nend-module\nfn add(a: Int, b: Int) -> Int { a }\nfn main() -> Int { add(1) }",
+				"E0401",
+			);
+			expect(errs.length).toBe(1);
+		});
+
+		test("call return type flows to usage", () => {
+			const errs = errors(
+				'module t\nend-module\nfn get_name() -> String { "hi" }\nfn main() -> Int { get_name() }',
+				"E0401",
+			);
+			expect(errs.length).toBe(1); // String != Int return
+		});
+
+		test("chained calls", () => {
+			const result = check(
+				"module t\nend-module\nfn inc(x: Int) -> Int { x }\nfn main() -> Int { inc(inc(1)) }",
+			);
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
+
 	describe("typeMap population", () => {
 		test("literals have types in typeMap", () => {
 			const result = check(`module app

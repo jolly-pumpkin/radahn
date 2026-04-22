@@ -256,6 +256,9 @@ class Typer {
 			case "Ident":
 				ty = this.checkIdent(nodeId, node, env);
 				break;
+			case "CallExpr":
+				ty = this.checkCall(nodeId, node, env);
+				break;
 			case "Block":
 				ty = this.checkBlock(node, env);
 				break;
@@ -289,6 +292,59 @@ class Typer {
 
 		// Unresolved — already reported by resolver, propagate error
 		return ERROR_TYPE;
+	}
+
+	private checkCall(
+		_nodeId: NodeId,
+		node: Extract<AstNode, { kind: "CallExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const calleeType = this.checkExpr(node.callee, env);
+
+		// If callee is error, propagate without cascading
+		if (isError(calleeType)) return ERROR_TYPE;
+
+		// Callee must be a function type
+		if (calleeType.kind !== "fn") {
+			this.diagnostics.push({
+				code: "E0401",
+				severity: "error",
+				message: `type mismatch: expected a function, found \`${printType(calleeType)}\``,
+				span: node.span,
+				docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+			});
+			return ERROR_TYPE;
+		}
+
+		// Check argument count
+		if (node.args.length !== calleeType.params.length) {
+			this.diagnostics.push({
+				code: "E0401",
+				severity: "error",
+				message: `argument count mismatch: expected ${calleeType.params.length} argument(s), found ${node.args.length}`,
+				span: node.span,
+				docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+			});
+			return ERROR_TYPE;
+		}
+
+		// Check each argument type
+		for (let i = 0; i < node.args.length; i++) {
+			const argType = this.checkExpr(node.args[i], env);
+			const paramType = calleeType.params[i];
+			if (!isError(argType) && !isError(paramType) && !typesEqual(argType, paramType)) {
+				const argNode = this.arena.get(node.args[i]);
+				this.diagnostics.push({
+					code: "E0401",
+					severity: "error",
+					message: `argument type mismatch: expected \`${printType(paramType)}\`, found \`${printType(argType)}\``,
+					span: argNode.span,
+					docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+				});
+			}
+		}
+
+		return calleeType.returnType;
 	}
 
 	// -------------------------------------------------------------------
