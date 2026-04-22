@@ -270,9 +270,53 @@ describe("error handling", () => {
 		expect(errors).toHaveLength(0);
 	});
 
-	test("deferred TryExpr emits TODO comment without crashing", () => {
+	test("TryExpr emits early-return pattern", () => {
 		const ts = rd2ts("module t\nend-module\nfn f(x: Int) -> Int {\n  x?\n}");
-		expect(ts).toContain("TODO");
+		expect(ts).toContain("_try_");
+		expect(ts).toContain('"Err"');
+		expect(ts).toContain("return");
+	});
+
+	test("TryExpr in let binding emits temp, check, and .value_0", () => {
+		const ts = rd2ts([
+			"module t", "end-module",
+			"fn might_fail() -> Int { 42 }",
+			"fn f() -> Int {",
+			"  let x: Int = might_fail()?",
+			"  x",
+			"}",
+		].join("\n"));
+		expect(ts).toContain("const _try_0 = might_fail()");
+		expect(ts).toContain('if (_try_0.kind === "Err") return _try_0;');
+		expect(ts).toContain("const x: number = _try_0.value_0;");
+	});
+
+	test("TryExpr standalone emits temp and early return", () => {
+		const ts = rd2ts([
+			"module t", "end-module",
+			"fn do_thing() -> Int { 1 }",
+			"fn f() -> Int {",
+			"  do_thing()?",
+			"  42",
+			"}",
+		].join("\n"));
+		expect(ts).toContain("const _try_0 = do_thing()");
+		expect(ts).toContain('if (_try_0.kind === "Err") return _try_0;');
+	});
+
+	test("multiple TryExprs get unique temp names", () => {
+		const ts = rd2ts([
+			"module t", "end-module",
+			"fn a() -> Int { 1 }",
+			"fn b() -> Int { 2 }",
+			"fn f() -> Int {",
+			"  let x: Int = a()?",
+			"  let y: Int = b()?",
+			"  x + y",
+			"}",
+		].join("\n"));
+		expect(ts).toContain("_try_0");
+		expect(ts).toContain("_try_1");
 	});
 
 	test("deferred RangeExpr emits TODO comment without crashing", () => {

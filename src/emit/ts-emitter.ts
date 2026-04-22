@@ -28,6 +28,8 @@ class Emitter {
 	private sf!: SourceFile;
 	private diagnostics: Diagnostic[] = [];
 	private matchCounter = 0;
+	private tryCounter = 0;
+	private pendingStatements: string[] = [];
 
 	constructor(arena: Arena<AstNode>, resolutions: Map<NodeId, NodeId>) {
 		this.arena = arena;
@@ -101,7 +103,10 @@ class Emitter {
 			case "Import":
 				break; // erased
 			case "ExprStmt": {
-				this.sf.addStatements(`${this.emitExpr(node.expr)};`);
+				const val = this.emitExpr(node.expr);
+				const pending = this.flushPending();
+				for (const s of pending) this.sf.addStatements(s);
+				this.sf.addStatements(`${val};`);
 				break;
 			}
 			case "LetStmt": {
@@ -201,7 +206,10 @@ class Emitter {
 			const isLast = i === node.stmts.length - 1;
 			const stmt = this.arena.get(node.stmts[i]);
 			if (isLast && stmt.kind === "ExprStmt") {
-				lines.push(`return ${this.emitExpr(stmt.expr)};`);
+				const val = this.emitExpr(stmt.expr);
+				const pending = this.flushPending();
+				lines.push(...pending);
+				lines.push(`return ${val};`);
 			} else {
 				lines.push(this.emitStmt(node.stmts[i]));
 			}
@@ -214,13 +222,25 @@ class Emitter {
 		switch (node.kind) {
 			case "LetStmt":
 				return this.emitLetStmt(node);
-			case "ReturnStmt":
-				return node.value ? `return ${this.emitExpr(node.value)};` : "return;";
-			case "ExprStmt":
-				return `${this.emitExpr(node.expr)};`;
+			case "ReturnStmt": {
+				if (!node.value) return "return;";
+				const val = this.emitExpr(node.value);
+				const pending = this.flushPending();
+				return [...pending, `return ${val};`].join("\n");
+			}
+			case "ExprStmt": {
+				const val = this.emitExpr(node.expr);
+				const pending = this.flushPending();
+				return [...pending, `${val};`].join("\n");
+			}
 			default:
 				return `/* unsupported stmt: ${node.kind} */`;
 		}
+	}
+
+	private flushPending(): string[] {
+		const stmts = this.pendingStatements.splice(0);
+		return stmts;
 	}
 
 	private emitLetStmt(node: Extract<AstNode, { kind: "LetStmt" }>): string {
@@ -228,7 +248,9 @@ class Emitter {
 		const name = pattern.kind === "BindingPat" ? pattern.name : "_";
 		const typeAnnotation = node.type ? `: ${this.emitType(node.type)}` : "";
 		const value = this.emitExpr(node.value);
-		return `const ${name}${typeAnnotation} = ${value};`;
+		const pending = this.flushPending();
+		const letLine = `const ${name}${typeAnnotation} = ${value};`;
+		return [...pending, letLine].join("\n");
 	}
 
 	// --- Expression emission ---
@@ -279,8 +301,13 @@ class Emitter {
 				return this.emitBlockExprAsIIFE(node);
 			case "NamedArg":
 				return this.emitExpr(node.value);
-			case "TryExpr":
-				return `/* TODO: TryExpr */ ${this.emitExpr(node.expr)}`;
+			case "TryExpr": {
+				const tryVar = `_try_${this.tryCounter++}`;
+				const inner = this.emitExpr(node.expr);
+				this.pendingStatements.push(`const ${tryVar} = ${inner};`);
+				this.pendingStatements.push(`if (${tryVar}.kind === "Err") return ${tryVar};`);
+				return `${tryVar}.value_0`;
+			}
 			case "TurbofishExpr":
 				return this.emitExpr(node.expr);
 			case "RangeExpr":
