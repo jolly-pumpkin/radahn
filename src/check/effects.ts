@@ -123,22 +123,26 @@ class EffectChecker {
 			// Pure function: if any effects found → E0303
 			for (const [, { effect, callSpan }] of collected) {
 				const effRowStr = `! { ${effect.name} }`;
-				this.diagnostics.push({
+				const diag: Diagnostic = {
 					code: "E0303",
 					severity: "error",
 					message: `calling an effectful function (\`${effRowStr}\`) from a pure function \`${node.name}\` — add an effect row or wrap in an effectful caller`,
 					span: callSpan,
 					docs: DIAGNOSTIC_REGISTRY.E0303.docs,
-				});
+				};
+				if (effect.fromExtern) {
+					diag.notes = [{ message: `effect \`${effect.name}\` originates from an extern declaration (trusted, not verified)` }];
+				}
+				this.diagnostics.push(diag);
 			}
 		} else if (declaredRow.kind === "closed") {
 			// Closed row: each computed effect must appear in declared set
-			for (const [effName, { callSpan }] of collected) {
+			for (const [effName, { effect, callSpan }] of collected) {
 				if (!declaredNames.has(effName)) {
 					const declStr = declaredNames.size > 0
 						? `! { ${[...declaredNames].join(", ")} }`
 						: "! {}";
-					this.diagnostics.push({
+					const diag: Diagnostic = {
 						code: "E0301",
 						severity: "error",
 						message: `function \`${node.name}\` performs effect \`${effName}\` but its signature declares \`${declStr}\` — add \`${effName}\` to the effect row or remove the call`,
@@ -150,7 +154,11 @@ class EffectChecker {
 							insert: effName,
 						}],
 						docs: DIAGNOSTIC_REGISTRY.E0301.docs,
-					});
+					};
+					if (effect.fromExtern) {
+						diag.notes = [{ message: `effect \`${effName}\` originates from an extern declaration (trusted, not verified)` }];
+					}
+					this.diagnostics.push(diag);
 				}
 			}
 		}

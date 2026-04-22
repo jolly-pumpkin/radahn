@@ -203,6 +203,64 @@ fn effectful_fn() -> Void ! { log } {
 		});
 	});
 
+	describe("effect checker — extern provenance", () => {
+		test("extern effect carries provenance note in E0301", () => {
+			const src = `module t
+end-module
+
+extern "node_http" {
+  fn fetch(url: String) -> String ! { net }
+}
+
+fn f() -> String ! { log } {
+  fetch("url")
+}
+`;
+			const errs = errors(src, "E0301");
+			expect(errs.length).toBe(1);
+			expect(errs[0].notes).toBeDefined();
+			expect(errs[0].notes!.length).toBeGreaterThan(0);
+			expect(errs[0].notes![0].message).toContain("extern");
+		});
+
+		test("extern effect carries provenance note in E0303", () => {
+			const src = `module t
+end-module
+
+extern "node_http" {
+  fn fetch(url: String) -> String ! { net }
+}
+
+fn f() -> String {
+  fetch("url")
+}
+`;
+			const errs = errors(src, "E0303");
+			expect(errs.length).toBe(1);
+			expect(errs[0].notes).toBeDefined();
+			expect(errs[0].notes![0].message).toContain("extern");
+		});
+
+		test("non-extern effect has no provenance note", () => {
+			const src = `module t
+end-module
+
+fn log_msg(msg: String) -> String ! { log } {
+  msg
+}
+
+fn f() -> String ! { net } {
+  log_msg("hi")
+}
+`;
+			const errs = errors(src, "E0301");
+			expect(errs.length).toBe(1);
+			// Should NOT have extern provenance notes
+			const hasExternNote = errs[0].notes?.some((n) => n.message.includes("extern"));
+			expect(hasExternNote ?? false).toBe(false);
+		});
+	});
+
 	describe("skips ill-typed calls", () => {
 		test("error-typed call does not produce phantom effects", () => {
 			const src = `module app
