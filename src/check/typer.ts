@@ -19,6 +19,9 @@ import {
 	isError,
 	typesEqual,
 	printType,
+	freshTypeVar,
+	substituteType,
+	unify,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -97,10 +100,27 @@ class Typer {
 		// Build local environment: param name → Type
 		const env = new Map<string, Type>();
 
+		// If generic, create a type var map for resolving param/return types
+		let typeVarMap: Map<string, Type> | null = null;
+		if (node.typeParams !== null) {
+			const tpNode = this.arena.get(node.typeParams);
+			if (tpNode.kind === "TypeParams") {
+				typeVarMap = new Map<string, Type>();
+				for (const name of tpNode.names) {
+					typeVarMap.set(name, freshTypeVar(name));
+				}
+			}
+		}
+
+		const resolveType = (typeId: NodeId): Type =>
+			typeVarMap !== null
+				? this.resolveTypeNodeWithVars(typeId, typeVarMap)
+				: this.resolveTypeNode(typeId);
+
 		for (const paramId of node.params) {
 			const param = this.arena.get(paramId);
 			if (param.kind === "Param") {
-				const paramType = this.resolveTypeNode(param.type);
+				const paramType = resolveType(param.type);
 				this.typeMap.set(paramId, paramType);
 				if (param.name !== "<error>") {
 					env.set(param.name, paramType);
@@ -109,7 +129,7 @@ class Typer {
 		}
 
 		// Resolve declared return type
-		const declaredReturn = node.returnType !== null ? this.resolveTypeNode(node.returnType) : VOID;
+		const declaredReturn = node.returnType !== null ? resolveType(node.returnType) : VOID;
 
 		// Store the fn type itself
 		const paramTypes = node.params.map((pid) => this.typeMap.get(pid) ?? ERROR_TYPE);
@@ -130,9 +150,18 @@ class Typer {
 			const bodyType = this.checkNode(node.body, env);
 
 			// Compare body type against declared return
-			if (!isError(bodyType) && !isError(declaredReturn) && !typesEqual(bodyType, declaredReturn)) {
-				const bodyNode = this.arena.get(node.body);
-				this.emitTypeMismatch(declaredReturn, bodyType, bodyNode.span);
+			if (!isError(bodyType) && !isError(declaredReturn)) {
+				if (typeVarMap !== null) {
+					// For generic functions, use unification instead of strict equality
+					const subst = new Map<number, Type>();
+					if (!unify(declaredReturn, bodyType, subst)) {
+						const bodyNode = this.arena.get(node.body);
+						this.emitTypeMismatch(declaredReturn, bodyType, bodyNode.span);
+					}
+				} else if (!typesEqual(bodyType, declaredReturn)) {
+					const bodyNode = this.arena.get(node.body);
+					this.emitTypeMismatch(declaredReturn, bodyType, bodyNode.span);
+				}
 			}
 
 			this.currentReturnType = prevReturn;
@@ -308,6 +337,18 @@ class Typer {
 		node: Extract<AstNode, { kind: "CallExpr" }>,
 		env: Map<string, Type>,
 	): Type {
+		// Check if callee is a generic function before evaluating normally
+		const calleeNode = this.arena.get(node.callee);
+		if (calleeNode.kind === "Ident") {
+			const declId = this.resolutions.get(node.callee);
+			if (declId !== undefined && (declId as number) !== -1) {
+				const declNode = this.arena.get(declId);
+				if (declNode.kind === "FnDecl" && declNode.typeParams !== null) {
+					return this.checkGenericCall(node, declNode, env);
+				}
+			}
+		}
+
 		const calleeType = this.checkExpr(node.callee, env);
 
 		// If callee is error, propagate without cascading
@@ -354,6 +395,121 @@ class Typer {
 		}
 
 		return calleeType.returnType;
+	}
+
+	private checkGenericCall(
+		node: Extract<AstNode, { kind: "CallExpr" }>,
+		fnDecl: Extract<AstNode, { kind: "FnDecl" }>,
+		env: Map<string, Type>,
+	): Type {
+		// Get type parameter names
+		const typeParamsNode = this.arena.get(fnDecl.typeParams!);
+		if (typeParamsNode.kind !== "TypeParams") return ERROR_TYPE;
+
+		// Create fresh type variables for each type parameter
+		const typeVarMap = new Map<string, Type>();
+		for (const name of typeParamsNode.names) {
+			typeVarMap.set(name, freshTypeVar(name));
+		}
+
+		// Resolve param types with type variables substituted
+		const paramTypes: Type[] = [];
+		for (const paramId of fnDecl.params) {
+			const param = this.arena.get(paramId);
+			if (param.kind === "Param") {
+				paramTypes.push(this.resolveTypeNodeWithVars(param.type, typeVarMap));
+			} else {
+				paramTypes.push(ERROR_TYPE);
+			}
+		}
+
+		// Resolve return type with type variables substituted
+		const returnType = fnDecl.returnType !== null
+			? this.resolveTypeNodeWithVars(fnDecl.returnType, typeVarMap)
+			: VOID;
+
+		// Check argument count
+		if (node.args.length !== paramTypes.length) {
+			this.diagnostics.push({
+				code: "E0401",
+				severity: "error",
+				message: `argument count mismatch: expected ${paramTypes.length} argument(s), found ${node.args.length}`,
+				span: node.span,
+				docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+			});
+			return ERROR_TYPE;
+		}
+
+		// Unify each argument type with the parameter type
+		const subst = new Map<number, Type>();
+		for (let i = 0; i < node.args.length; i++) {
+			const argType = this.checkExpr(node.args[i], env);
+			if (isError(argType) || isError(paramTypes[i])) continue;
+			if (!unify(paramTypes[i], argType, subst)) {
+				const argNode = this.arena.get(node.args[i]);
+				const resolvedParam = substituteType(paramTypes[i], subst);
+				this.diagnostics.push({
+					code: "E0401",
+					severity: "error",
+					message: `argument type mismatch: expected \`${printType(resolvedParam)}\`, found \`${printType(argType)}\``,
+					span: argNode.span,
+					docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+				});
+			}
+		}
+
+		return substituteType(returnType, subst);
+	}
+
+	private resolveTypeNodeWithVars(typeId: NodeId, typeVarMap: Map<string, Type>): Type {
+		const node = this.arena.get(typeId);
+		switch (node.kind) {
+			case "NominalType": {
+				// If it's a single-segment name matching a type param, return the type variable
+				if (node.segments.length === 1 && node.typeArgs.length === 0) {
+					const tv = typeVarMap.get(node.segments[0]);
+					if (tv !== undefined) return tv;
+				}
+				const name = node.segments.join(".");
+				// Primitive type shortcuts
+				switch (name) {
+					case "Int": return INT;
+					case "Float": return FLOAT;
+					case "String": return STRING;
+					case "Bool": return BOOL;
+				}
+				// Non-primitive nominal type — resolve type args with vars too
+				const typeArgs = node.typeArgs.map((a) => this.resolveTypeNodeWithVars(a, typeVarMap));
+				const declNode = this.resolutions.get(typeId) ?? (-1 as NodeId);
+				return { kind: "nominal", name, declNode, typeArgs };
+			}
+			case "RecordType": {
+				const fields = new Map<string, Type>();
+				for (const fieldId of node.fields) {
+					const field = this.arena.get(fieldId);
+					if (field.kind === "Field") {
+						fields.set(field.name, this.resolveTypeNodeWithVars(field.type, typeVarMap));
+					}
+				}
+				return { kind: "record", fields };
+			}
+			case "TupleType": {
+				const elements = node.elements.map((e) => this.resolveTypeNodeWithVars(e, typeVarMap));
+				return { kind: "tuple", elements };
+			}
+			case "FnType": {
+				const params = node.params.map((p) => this.resolveTypeNodeWithVars(p, typeVarMap));
+				const returnType = this.resolveTypeNodeWithVars(node.returnType, typeVarMap);
+				const effectRow = node.effectRow !== null ? this.resolveEffectRow(node.effectRow) : PURE;
+				return { kind: "fn", params, returnType, effectRow };
+			}
+			case "VoidType":
+				return VOID;
+			case "RefinedType":
+				return this.resolveTypeNodeWithVars(node.base, typeVarMap);
+			default:
+				return ERROR_TYPE;
+		}
 	}
 
 	// -------------------------------------------------------------------

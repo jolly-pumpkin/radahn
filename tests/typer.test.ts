@@ -267,6 +267,58 @@ fn b() -> Bool {
 		});
 	});
 
+	describe("generics", () => {
+		test("generic identity function", () => {
+			const src = [
+				"module t", "end-module",
+				"fn id[A](x: A) -> A { x }",
+				"fn main() -> Int { id(42) }",
+			].join("\n");
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("generic function with wrong return context", () => {
+			const src = [
+				"module t", "end-module",
+				"fn id[A](x: A) -> A { x }",
+				'fn main() -> Int { id("hello") }',
+			].join("\n");
+			const errs = errors(src, "E0401");
+			expect(errs.length).toBe(1);
+		});
+
+		test("generic function with two type params", () => {
+			const src = [
+				"module t", "end-module",
+				"fn first[A, B](a: A, b: B) -> A { a }",
+				'fn main() -> Int { first(1, "hi") }',
+			].join("\n");
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("generic function with type args in return", () => {
+			const src = [
+				"module t", "end-module",
+				"fn wrap[A](x: A) -> List[A] { x }",
+				"fn main() -> List[Int] { wrap(42) }",
+			].join("\n");
+			const result = check(src);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("generic call type mismatch in arg", () => {
+			const src = [
+				"module t", "end-module",
+				"fn pair[A](x: A, y: A) -> A { x }",
+				'fn main() -> Int { pair(1, "hi") }',
+			].join("\n");
+			const errs = errors(src, "E0401");
+			expect(errs.length).toBeGreaterThan(0);
+		});
+	});
+
 	describe("typeMap population", () => {
 		test("literals have types in typeMap", () => {
 			const result = check(`module app
