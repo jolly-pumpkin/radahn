@@ -1,9 +1,11 @@
-import type { Command } from "commander";
 import { readFileSync } from "node:fs";
+import type { Command } from "commander";
+import type { Diagnostic } from "../../diag/types";
 import { lex } from "../../lex/index";
 import { parse } from "../../parse/index";
 import { resolve } from "../../resolve/index";
-import type { Diagnostic } from "../../diag/types";
+import { typeCheck } from "../../check/typer";
+import { effectCheck } from "../../check/effects";
 
 export function registerCheck(program: Command): void {
 	program
@@ -32,11 +34,20 @@ export function registerCheck(program: Command): void {
 				const lexResult = lex(source, file);
 				const parseResult = parse(lexResult.tokens, file);
 				const resolveResult = resolve(parseResult.root, parseResult.arena);
+				const typeResult = typeCheck(parseResult.root, parseResult.arena, resolveResult.resolutions);
+				const effectResult = effectCheck(
+					parseResult.root,
+					parseResult.arena,
+					resolveResult.resolutions,
+					typeResult.typeMap,
+				);
 
 				const allDiagnostics: Diagnostic[] = [
 					...lexResult.diagnostics,
 					...parseResult.diagnostics,
 					...resolveResult.diagnostics,
+					...typeResult.diagnostics,
+					...effectResult.diagnostics,
 				];
 
 				if (options.json) {

@@ -1,11 +1,13 @@
-import type { Command } from "commander";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { Command } from "commander";
+import type { Diagnostic } from "../../diag/types";
+import { emit } from "../../emit/index";
 import { lex } from "../../lex/index";
 import { parse } from "../../parse/index";
 import { resolve } from "../../resolve/index";
-import { emit } from "../../emit/index";
-import type { Diagnostic } from "../../diag/types";
+import { typeCheck } from "../../check/typer";
+import { effectCheck } from "../../check/effects";
 
 export function registerBuild(program: Command): void {
 	program
@@ -36,12 +38,21 @@ export function registerBuild(program: Command): void {
 				const lexResult = lex(source, file);
 				const parseResult = parse(lexResult.tokens, file);
 				const resolveResult = resolve(parseResult.root, parseResult.arena);
+				const typeResult = typeCheck(parseResult.root, parseResult.arena, resolveResult.resolutions);
+				const effectResult = effectCheck(
+					parseResult.root,
+					parseResult.arena,
+					resolveResult.resolutions,
+					typeResult.typeMap,
+				);
 				const emitResult = emit(parseResult.root, parseResult.arena, resolveResult.resolutions);
 
 				const allDiagnostics: Diagnostic[] = [
 					...lexResult.diagnostics,
 					...parseResult.diagnostics,
 					...resolveResult.diagnostics,
+					...typeResult.diagnostics,
+					...effectResult.diagnostics,
 					...emitResult.diagnostics,
 				];
 
