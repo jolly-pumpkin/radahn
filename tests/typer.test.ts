@@ -197,6 +197,76 @@ fn b() -> Bool {
 		});
 	});
 
+	describe("binary operators", () => {
+		test("arithmetic on Int", () => {
+			const result = check("module t\nend-module\nfn f(a: Int, b: Int) -> Int { a + b }");
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("arithmetic on Float", () => {
+			const result = check("module t\nend-module\nfn f(a: Float, b: Float) -> Float { a * b }");
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("arithmetic on mismatched types", () => {
+			const errs = errors('module t\nend-module\nfn f(a: Int, b: String) -> Int { a + b }', "E0401");
+			expect(errs.length).toBeGreaterThan(0);
+		});
+
+		test("comparison returns Bool", () => {
+			const result = check("module t\nend-module\nfn f(a: Int, b: Int) -> Bool { a == b }");
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("logical operators require Bool", () => {
+			const result = check("module t\nend-module\nfn f(a: Bool, b: Bool) -> Bool { a && b }");
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("logical operator on non-Bool is E0401", () => {
+			const errs = errors("module t\nend-module\nfn f(a: Int, b: Int) -> Bool { a && b }", "E0401");
+			expect(errs.length).toBeGreaterThan(0);
+		});
+
+		test("string concatenation", () => {
+			const result = check('module t\nend-module\nfn f(a: String, b: String) -> String { a ++ b }');
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
+
+	describe("if expressions", () => {
+		test("if with matching branches", () => {
+			const result = check(
+				"module t\nend-module\nfn f(x: Bool) -> Int { if x { 1 } else { 2 } }",
+			);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("if condition must be Bool", () => {
+			const errs = errors(
+				"module t\nend-module\nfn f(x: Int) -> Int { if x { 1 } else { 2 } }",
+				"E0401",
+			);
+			expect(errs.length).toBe(1);
+			expect(errs[0].message).toContain("Bool");
+		});
+
+		test("if branches must match types", () => {
+			const errs = errors(
+				'module t\nend-module\nfn f(x: Bool) -> Int { if x { 1 } else { "hi" } }',
+				"E0401",
+			);
+			expect(errs.length).toBeGreaterThan(0);
+		});
+
+		test("if without else returns Void", () => {
+			const result = check(
+				"module t\nend-module\nfn f(x: Bool) -> () { if x { 1 } }",
+			);
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
+
 	describe("typeMap population", () => {
 		test("literals have types in typeMap", () => {
 			const result = check(`module app

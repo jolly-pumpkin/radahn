@@ -265,6 +265,15 @@ class Typer {
 			case "BlockExpr":
 				ty = this.checkNode(node.block, env);
 				break;
+			case "BinaryExpr":
+				ty = this.checkBinaryExpr(nodeId, node, env);
+				break;
+			case "UnaryExpr":
+				ty = this.checkUnaryExpr(node, env);
+				break;
+			case "IfExpr":
+				ty = this.checkIf(nodeId, node, env);
+				break;
 			default:
 				// Unhandled expression kinds — return ERROR_TYPE (no cascading)
 				ty = ERROR_TYPE;
@@ -345,6 +354,136 @@ class Typer {
 		}
 
 		return calleeType.returnType;
+	}
+
+	// -------------------------------------------------------------------
+	// Binary expressions
+	// -------------------------------------------------------------------
+
+	private checkBinaryExpr(
+		_nodeId: NodeId,
+		node: Extract<AstNode, { kind: "BinaryExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const leftType = this.checkExpr(node.left, env);
+		const rightType = this.checkExpr(node.right, env);
+
+		// Don't cascade errors
+		if (isError(leftType) || isError(rightType)) return ERROR_TYPE;
+
+		const op = node.op;
+
+		// Arithmetic: +, -, *, /, % — both must be same numeric type
+		if (op === "+" || op === "-" || op === "*" || op === "/" || op === "%") {
+			const isNumeric = (t: Type) => t.kind === "int" || t.kind === "float";
+			if (!isNumeric(leftType)) {
+				this.emitTypeMismatch(INT, leftType, this.arena.get(node.left).span);
+				return ERROR_TYPE;
+			}
+			if (!typesEqual(leftType, rightType)) {
+				this.emitTypeMismatch(leftType, rightType, this.arena.get(node.right).span);
+				return ERROR_TYPE;
+			}
+			return leftType;
+		}
+
+		// String concatenation: ++
+		if (op === "++") {
+			if (leftType.kind !== "string") {
+				this.emitTypeMismatch(STRING, leftType, this.arena.get(node.left).span);
+				return ERROR_TYPE;
+			}
+			if (rightType.kind !== "string") {
+				this.emitTypeMismatch(STRING, rightType, this.arena.get(node.right).span);
+				return ERROR_TYPE;
+			}
+			return STRING;
+		}
+
+		// Comparison: ==, !=, <, <=, >, >= — both must be same type, returns Bool
+		if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+			if (!typesEqual(leftType, rightType)) {
+				this.emitTypeMismatch(leftType, rightType, this.arena.get(node.right).span);
+				return ERROR_TYPE;
+			}
+			return BOOL;
+		}
+
+		// Logical: &&, || — both must be Bool
+		if (op === "&&" || op === "||") {
+			if (leftType.kind !== "bool") {
+				this.emitTypeMismatch(BOOL, leftType, this.arena.get(node.left).span);
+				return ERROR_TYPE;
+			}
+			if (rightType.kind !== "bool") {
+				this.emitTypeMismatch(BOOL, rightType, this.arena.get(node.right).span);
+				return ERROR_TYPE;
+			}
+			return BOOL;
+		}
+
+		return ERROR_TYPE;
+	}
+
+	// -------------------------------------------------------------------
+	// Unary expressions
+	// -------------------------------------------------------------------
+
+	private checkUnaryExpr(
+		node: Extract<AstNode, { kind: "UnaryExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const operandType = this.checkExpr(node.operand, env);
+		if (isError(operandType)) return ERROR_TYPE;
+
+		if (node.op === "-") {
+			if (operandType.kind !== "int" && operandType.kind !== "float") {
+				this.emitTypeMismatch(INT, operandType, this.arena.get(node.operand).span);
+				return ERROR_TYPE;
+			}
+			return operandType;
+		}
+
+		if (node.op === "!") {
+			if (operandType.kind !== "bool") {
+				this.emitTypeMismatch(BOOL, operandType, this.arena.get(node.operand).span);
+				return ERROR_TYPE;
+			}
+			return BOOL;
+		}
+
+		return ERROR_TYPE;
+	}
+
+	// -------------------------------------------------------------------
+	// If expressions
+	// -------------------------------------------------------------------
+
+	private checkIf(
+		_nodeId: NodeId,
+		node: Extract<AstNode, { kind: "IfExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const condType = this.checkExpr(node.condition, env);
+
+		if (!isError(condType) && condType.kind !== "bool") {
+			this.emitTypeMismatch(BOOL, condType, this.arena.get(node.condition).span);
+		}
+
+		const thenType = this.checkNode(node.then, env);
+
+		if (node.else_ === null) {
+			return VOID;
+		}
+
+		const elseType = this.checkNode(node.else_, env);
+
+		if (!isError(thenType) && !isError(elseType) && !typesEqual(thenType, elseType)) {
+			this.emitTypeMismatch(thenType, elseType, this.arena.get(node.else_).span);
+			return ERROR_TYPE;
+		}
+
+		return isError(thenType) ? elseType : thenType;
 	}
 
 	// -------------------------------------------------------------------
