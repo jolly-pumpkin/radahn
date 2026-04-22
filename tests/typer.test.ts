@@ -364,6 +364,63 @@ fn b() -> Bool {
 		});
 	});
 
+	describe("try expression", () => {
+		test("? on Result unwraps to ok type", () => {
+			const src = [
+				"module t", "end-module",
+				"type MyErr | Fail end",
+				"fn might_fail() -> Result[Int, MyErr] { 42 }",
+				"fn f() -> Result[Int, MyErr] {",
+				"  might_fail()?",
+				"}",
+			].join("\n");
+			const result = check(src);
+			// ? unwraps Result[Int, MyErr] to Int, and body returns Int
+			// but function declares Result[Int, MyErr] — this is a return type mismatch
+			// The key check: no errors about ? itself requiring Result
+			expect(result.diagnostics.filter(d => d.message.includes("`?` operator requires")).length).toBe(0);
+		});
+
+		test("? on non-Result is E0401", () => {
+			const src = [
+				"module t", "end-module",
+				"fn f() -> Int { 42? }",
+			].join("\n");
+			const errs = errors(src, "E0401");
+			expect(errs.length).toBeGreaterThan(0);
+			expect(errs[0].message).toContain("Result");
+		});
+
+		test("? with mismatched error type is E0401", () => {
+			const src = [
+				"module t", "end-module",
+				"type ErrA | A end",
+				"type ErrB | B end",
+				"fn might_fail() -> Result[Int, ErrA] { 42 }",
+				"fn f() -> Result[Int, ErrB] {",
+				"  might_fail()?",
+				"}",
+			].join("\n");
+			const errs = errors(src, "E0401");
+			expect(errs.length).toBeGreaterThan(0);
+			expect(errs.some(e => e.message.includes("error type mismatch"))).toBe(true);
+		});
+
+		test("? when function doesn't return Result is E0401", () => {
+			const src = [
+				"module t", "end-module",
+				"type MyErr | Fail end",
+				"fn might_fail() -> Result[Int, MyErr] { 42 }",
+				"fn f() -> Int {",
+				"  might_fail()?",
+				"}",
+			].join("\n");
+			const errs = errors(src, "E0401");
+			expect(errs.length).toBeGreaterThan(0);
+			expect(errs.some(e => e.message.includes("enclosing function to return"))).toBe(true);
+		});
+	});
+
 	describe("typeMap population", () => {
 		test("literals have types in typeMap", () => {
 			const result = check(`module app

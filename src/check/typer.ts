@@ -323,6 +323,9 @@ class Typer {
 			case "ListExpr":
 				ty = this.checkListExpr(node, env);
 				break;
+			case "TryExpr":
+				ty = this.checkTryExpr(node, env);
+				break;
 			default:
 				// Unhandled expression kinds — return ERROR_TYPE (no cascading)
 				ty = ERROR_TYPE;
@@ -1016,6 +1019,58 @@ class Typer {
 		}
 
 		return { kind: "nominal", name: "List", declNode: BUILTIN_DECL_NODE, typeArgs: [firstType] };
+	}
+
+	// -------------------------------------------------------------------
+	// Try expression (? operator)
+	// -------------------------------------------------------------------
+
+	private checkTryExpr(
+		node: Extract<AstNode, { kind: "TryExpr" }>,
+		env: Map<string, Type>,
+	): Type {
+		const innerType = this.checkExpr(node.expr, env);
+		if (isError(innerType)) return ERROR_TYPE;
+
+		// Must be Result[T, E]
+		if (innerType.kind !== "nominal" || innerType.name !== "Result" || innerType.typeArgs.length !== 2) {
+			this.diagnostics.push({
+				code: "E0401",
+				severity: "error",
+				message: `\`?\` operator requires \`Result[T, E]\`, got \`${printType(innerType)}\``,
+				span: node.span,
+				docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+			});
+			return ERROR_TYPE;
+		}
+
+		const [okType, errType] = innerType.typeArgs;
+
+		// Enclosing function must return Result[_, E] with same E
+		if (this.currentReturnType) {
+			const ret = this.currentReturnType;
+			if (ret.kind !== "nominal" || ret.name !== "Result" || ret.typeArgs.length !== 2) {
+				this.diagnostics.push({
+					code: "E0401",
+					severity: "error",
+					message: `\`?\` requires enclosing function to return \`Result\`, but it returns \`${printType(ret)}\``,
+					span: node.span,
+					docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+				});
+				return ERROR_TYPE;
+			}
+			if (!typesEqual(errType, ret.typeArgs[1])) {
+				this.diagnostics.push({
+					code: "E0401",
+					severity: "error",
+					message: `\`?\` error type mismatch: inner is \`${printType(errType)}\` but function returns \`Result[_, ${printType(ret.typeArgs[1])}]\``,
+					span: node.span,
+					docs: DIAGNOSTIC_REGISTRY.E0401.docs,
+				});
+			}
+		}
+
+		return okType;
 	}
 
 	// -------------------------------------------------------------------
